@@ -26,6 +26,21 @@ function saveUtangs() {
     window.dispatchEvent(new Event('kitako-data-changed'));
 }
 
+// ==================== DAILY GOAL PERSISTENCE ====================
+
+function getDailyGoal() {
+    const raw = localStorage.getItem('kitako_daily_goal');
+    const n = parseFloat(raw);
+    if (!isFinite(n) || n <= 0) return 1000;
+    return n;
+}
+
+function setDailyGoal(value) {
+    localStorage.setItem('kitako_daily_goal', String(value));
+    // notify other listeners/pages in same window
+    window.dispatchEvent(new Event('kitako-data-changed'));
+}
+
 // ==================== MODAL FUNCTIONS ====================
 
 function openSaleModal() {
@@ -64,16 +79,54 @@ function closeUtangModal() {
     if (profitEl) profitEl.value = '';
 }
 
+// Goal modal handlers
+function openGoalModal() {
+    const modal = document.getElementById('goalModal');
+    if (!modal) return;
+    const input = document.getElementById('dailyGoalInput');
+    if (input) input.value = getDailyGoal();
+    modal.classList.remove('hidden');
+    if (input) input.focus();
+}
+
+function closeGoalModal() {
+    const modal = document.getElementById('goalModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+}
+
+// Save daily goal from modal
+function saveDailyGoal() {
+    const input = document.getElementById('dailyGoalInput');
+    if (!input) return;
+    const val = parseFloat(input.value);
+    if (!isFinite(val) || val <= 0) {
+        alert('Please enter a valid positive number for the daily goal.');
+        input.focus();
+        return;
+    }
+    setDailyGoal(val);
+    closeGoalModal();
+    showNotification('Daily goal updated', 'success');
+
+    // Update UI immediately
+    if (typeof updateDashboard === 'function') updateDashboard();
+}
+
 // Close modal when clicking outside
 window.onclick = function (event) {
     const saleModal = document.getElementById('saleModal');
     const utangModal = document.getElementById('utangModal');
+    const goalModal = document.getElementById('goalModal');
 
     if (event.target === saleModal) {
         closeSaleModal();
     }
     if (event.target === utangModal) {
         closeUtangModal();
+    }
+    if (event.target === goalModal) {
+        closeGoalModal();
     }
 }
 
@@ -229,7 +282,7 @@ function updateDashboard() {
     // Calculate totals
     const totalSales = sales.reduce((sum, sale) => sum + sale.amount, 0);
     const totalProfit = sales.reduce((sum, sale) => sum + sale.profit, 0);
-    const dailyGoal = 1000;
+    const dailyGoal = getDailyGoal();
     const progress = Math.min((totalSales / dailyGoal) * 100, 100);
 
     // Loss is now derived from outstanding utangs (sum of amounts)
@@ -261,7 +314,7 @@ function updateDashboard() {
     const percentEl = document.getElementById('progressPercent');
     if (percentEl) percentEl.textContent = `${Math.round(progress)}%`;
     const progressText = document.getElementById('progressText');
-    if (progressText) progressText.textContent = `₱${totalSales.toFixed(0)} / ₱${dailyGoal}`;
+    if (progressText) progressText.textContent = `₱${totalSales.toFixed(0)} / ₱${Number(dailyGoal).toFixed(0)}`;
 
     // Update upcoming utangs
     const upcomingUtangs = getUpcomingUtangs();
@@ -346,7 +399,7 @@ function updateSalesTracker() {
     const monthlyProfitEl = document.getElementById('monthlyProfit');
     const monthlyCountEl = document.getElementById('monthlyCount');
     if (monthlySalesEl) monthlySalesEl.textContent = `₱${monthlyTotal.toFixed(2)}`;
-    if (monthlyProfitEl) monthlyProfitEl.textContent = `₱${monthlyProfit.toFixed(2)}`;
+    if (monthlyProfitEl) monthlyProfitEl.textContent = `Profit: ₱${monthlyProfit.toFixed(2)}`;
     if (monthlyCountEl) monthlyCountEl.textContent = `${monthlySales.length} sales`;
 
     // Update sales history table
@@ -527,7 +580,7 @@ window.addEventListener('kitako-data-changed', function () {
 
 // When localStorage changes in other tabs/windows, update UI here
 window.addEventListener('storage', function (e) {
-    if (e.key === 'kitako_utangs' || e.key === 'kitako_sales') {
+    if (e.key === 'kitako_utangs' || e.key === 'kitako_sales' || e.key === 'kitako_daily_goal') {
         refreshDataFromStorage();
 
         if (typeof updateDashboard === 'function') updateDashboard();
@@ -543,12 +596,16 @@ document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
         const saleModal = document.getElementById('saleModal');
         const utangModal = document.getElementById('utangModal');
+        const goalModal = document.getElementById('goalModal');
 
         if (saleModal && !saleModal.classList.contains('hidden')) {
             closeSaleModal();
         }
         if (utangModal && !utangModal.classList.contains('hidden')) {
             closeUtangModal();
+        }
+        if (goalModal && !goalModal.classList.contains('hidden')) {
+            closeGoalModal();
         }
     }
 
