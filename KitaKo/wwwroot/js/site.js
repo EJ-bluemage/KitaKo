@@ -11,6 +11,8 @@ let utangs = JSON.parse(localStorage.getItem('kitako_utangs')) || [];
 function refreshDataFromStorage() {
     sales = JSON.parse(localStorage.getItem('kitako_sales')) || [];
     utangs = JSON.parse(localStorage.getItem('kitako_utangs')) || [];
+    expenses = JSON.parse(localStorage.getItem('kitako_expenses')) || expenses;
+    availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || availableBudget;
 }
 
 // Save data to localStorage
@@ -44,13 +46,16 @@ function setDailyGoal(value) {
 // ==================== MODAL FUNCTIONS ====================
 
 function openSaleModal() {
-    document.getElementById('saleModal').classList.remove('hidden');
+    const elModal = document.getElementById('saleModal');
+    if (!elModal) return;
+    elModal.classList.remove('hidden');
     const el = document.getElementById('saleAmount');
     if (el) el.focus();
 }
 
 function closeSaleModal() {
-    document.getElementById('saleModal').classList.add('hidden');
+    const elModal = document.getElementById('saleModal');
+    if (elModal) elModal.classList.add('hidden');
     // Clear form
     const amountEl = document.getElementById('saleAmount');
     const profitEl = document.getElementById('saleProfit');
@@ -61,13 +66,16 @@ function closeSaleModal() {
 }
 
 function openUtangModal() {
-    document.getElementById('utangModal').classList.remove('hidden');
+    const elModal = document.getElementById('utangModal');
+    if (!elModal) return;
+    elModal.classList.remove('hidden');
     const el = document.getElementById('utangCustomerName');
     if (el) el.focus();
 }
 
 function closeUtangModal() {
-    document.getElementById('utangModal').classList.add('hidden');
+    const elModal = document.getElementById('utangModal');
+    if (elModal) elModal.classList.add('hidden');
     // Clear form
     const nameEl = document.getElementById('utangCustomerName');
     const amountEl = document.getElementById('utangAmount');
@@ -526,6 +534,438 @@ function updateUtangLogs() {
     if (dueSoonCountEl) dueSoonCountEl.textContent = dueSoonCount;
 }
 
+// ==================== EXPENSES & KNAPSACK ALGORITHM ====================
+
+// Load expenses from localStorage or use defaults
+let expenses = JSON.parse(localStorage.getItem('kitako_expenses')) || [
+    { id: 1, name: 'Grocery Restock', amount: 5000, dueDate: '2026-01-15', priority: 5, paid: false },
+    { id: 2, name: 'Water Bill', amount: 500, dueDate: '2026-01-20', priority: 4, paid: false },
+    { id: 3, name: 'Electric Bill', amount: 1500, dueDate: '2026-01-18', priority: 4, paid: false },
+    { id: 4, name: 'Rent', amount: 3000, dueDate: '2026-01-25', priority: 5, paid: false }
+];
+
+// Load available budget
+let availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || 8000;
+
+// ==================== LOCAL STORAGE HELPERS ====================
+
+function saveExpenses() {
+    localStorage.setItem('kitako_expenses', JSON.stringify(expenses));
+    // notify other listeners/pages in same window
+    window.dispatchEvent(new Event('kitako-data-changed'));
+}
+
+function saveBudget() {
+    localStorage.setItem('kitako_budget', availableBudget.toString());
+    window.dispatchEvent(new Event('kitako-data-changed'));
+}
+
+// New function: clear expenses and budget so user can start fresh
+function clearExpensesAndBudget() {
+    if (!confirm('Clear ALL expenses and reset the budget to ₱0? This cannot be undone.')) return;
+
+    // Clear in-memory
+    expenses = [];
+    availableBudget = 0;
+
+    // Persist changes (save functions dispatch kitako-data-changed)
+    saveExpenses();
+    saveBudget();
+
+    // Update UI immediately
+    if (typeof updateExpensesPage === 'function') updateExpensesPage();
+    if (typeof updateDashboard === 'function') updateDashboard();
+
+    showNotification('Expenses cleared and budget reset to ₱0', 'success');
+}
+
+// ==================== KNAPSACK OPTIMIZATION ====================
+
+function knapsackOptimize() {
+    const unpaidExpenses = expenses.filter(expense => !expense.paid);
+    const itemCount = unpaidExpenses.length;
+    const maxBudget = Math.floor(availableBudget);
+
+    if (itemCount === 0 || maxBudget === 0) {
+        return [];
+    }
+
+    // Dynamic Programming table
+    const dp = Array(itemCount + 1)
+        .fill(null)
+        .map(() => Array(maxBudget + 1).fill(0));
+
+    // Build DP table
+    for (let i = 1; i <= itemCount; i++) {
+        const expense = unpaidExpenses[i - 1];
+        const cost = Math.floor(expense.amount);
+        const value = expense.priority * 100;
+
+        for (let w = 0; w <= maxBudget; w++) {
+            if (cost <= w) {
+                dp[i][w] = Math.max(
+                    dp[i - 1][w],
+                    dp[i - 1][w - cost] + value
+                );
+            } else {
+                dp[i][w] = dp[i - 1][w];
+            }
+        }
+    }
+
+    // Backtrack to find selected expenses
+    const selectedIds = [];
+    let remainingBudget = maxBudget;
+
+    for (let i = itemCount; i > 0 && remainingBudget > 0; i--) {
+        if (dp[i][remainingBudget] !== dp[i - 1][remainingBudget]) {
+            const expense = unpaidExpenses[i - 1];
+            selectedIds.push(expense.id);
+            remainingBudget -= Math.floor(expense.amount);
+        }
+    }
+
+    return selectedIds;
+}
+
+// ==================== UI HELPERS ====================
+
+function getPriorityStars(priority) {
+    return '★'.repeat(priority) + '☆'.repeat(5 - priority);
+}
+
+function getDaysUntilDue(dueDate) {
+    const today = new Date();
+    const due = new Date(dueDate);
+    const diffTime = due - today;
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+function getUrgencyClass(days) {
+    if (days < 0) return 'text-red-600 bg-red-100';
+    if (days <= 3) return 'text-orange-600 bg-orange-100';
+    if (days <= 7) return 'text-yellow-600 bg-yellow-100';
+    return 'text-green-600 bg-green-100';
+}
+
+// ==================== EXPENSE MODAL ====================
+
+function openExpenseModal() {
+    const modal = document.getElementById('expenseModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    const nameEl = document.getElementById('expenseName');
+    if (nameEl) nameEl.focus();
+}
+
+function closeExpenseModal() {
+    const modal = document.getElementById('expenseModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+
+    const nameEl = document.getElementById('expenseName');
+    const amountEl = document.getElementById('expenseAmount');
+    const dueEl = document.getElementById('expenseDueDate');
+    const prEl = document.getElementById('expensePriority');
+
+    if (nameEl) nameEl.value = '';
+    if (amountEl) amountEl.value = '';
+    if (dueEl) dueEl.value = '';
+    if (prEl) prEl.value = '3';
+
+    updatePriorityDisplay(3);
+}
+
+function updatePriorityDisplay(priority) {
+    const stars = getPriorityStars(parseInt(priority));
+    const disp = document.getElementById('priorityDisplay');
+    if (disp) disp.textContent = `${stars} (${priority}/5)`;
+}
+
+// ==================== EXPENSE ACTIONS ====================
+
+function addExpense() {
+    const nameEl = document.getElementById('expenseName');
+    const amountEl = document.getElementById('expenseAmount');
+    const dueDateEl = document.getElementById('expenseDueDate');
+    const prEl = document.getElementById('expensePriority');
+
+    const name = nameEl ? nameEl.value : '';
+    const amount = amountEl ? parseFloat(amountEl.value) : NaN;
+    const dueDate = dueDateEl ? dueDateEl.value : '';
+    const priority = prEl ? parseInt(prEl.value) : 3;
+
+    if (!name || !amount || !dueDate) {
+        alert('Please fill in all fields');
+        return;
+    }
+
+    const expense = {
+        id: Date.now(),
+        name,
+        amount,
+        dueDate,
+        priority,
+        paid: false
+    };
+
+    expenses.push(expense);
+    saveExpenses();
+    closeExpenseModal();
+    updateExpensesPage();
+    showNotification('Expense added successfully!', 'success');
+}
+
+function markExpensePaid(id) {
+    expenses = expenses.map(expense =>
+        expense.id === id ? { ...expense, paid: true } : expense
+    );
+
+    saveExpenses();
+    updateExpensesPage();
+    showNotification('Expense marked as paid!', 'success');
+}
+
+function deleteExpense(id) {
+    if (!confirm('Delete this expense?')) return;
+
+    expenses = expenses.filter(expense => expense.id !== id);
+    saveExpenses();
+    updateExpensesPage();
+    showNotification('Expense deleted!', 'success');
+}
+
+function updateBudget() {
+    const newBudget = prompt('Enter new available budget:', availableBudget);
+
+    if (newBudget && !isNaN(newBudget)) {
+        availableBudget = parseFloat(newBudget);
+        saveBudget();
+        updateExpensesPage();
+        showNotification('Budget updated!', 'success');
+    }
+}
+
+// ==================== PAGE RENDERING ====================
+
+function updateExpensesPage() {
+    // Ensure we have the latest data
+    refreshDataFromStorage();
+
+    const optimizedIds = knapsackOptimize();
+
+    const totalUnpaid = expenses
+        .filter(e => !e.paid)
+        .reduce((sum, e) => sum + e.amount, 0);
+
+    const optimizedTotal = expenses
+        .filter(e => optimizedIds.includes(e.id))
+        .reduce((sum, e) => sum + e.amount, 0);
+
+    const paidCount = expenses.filter(e => e.paid).length;
+    const unpaidCount = expenses.filter(e => !e.paid).length;
+
+    // Budget display
+    const availableBudgetEl = document.getElementById('availableBudget');
+    if (availableBudgetEl) availableBudgetEl.textContent = `₱${availableBudget.toFixed(2)}`;
+
+    // Stats
+    const totalUnpaidEl = document.getElementById('totalUnpaid');
+    const optimizedCostEl = document.getElementById('optimizedCost');
+    const unpaidCountEl = document.getElementById('unpaidCount');
+    const paidCountEl = document.getElementById('paidCount');
+
+    if (totalUnpaidEl) totalUnpaidEl.textContent = `₱${totalUnpaid.toFixed(2)}`;
+    if (optimizedCostEl) optimizedCostEl.textContent = `₱${optimizedTotal.toFixed(2)}`;
+    if (unpaidCountEl) unpaidCountEl.textContent = unpaidCount;
+    if (paidCountEl) paidCountEl.textContent = paidCount;
+
+    // AI Recommendation
+    const aiRecommendation = document.getElementById('aiRecommendation');
+    const recommendedExpenses = expenses.filter(e => optimizedIds.includes(e.id));
+
+    if (aiRecommendation) {
+        aiRecommendation.innerHTML = `
+        <div class="flex items-start gap-4">
+            <div class="bg-white/20 p-3 rounded-full">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                    </path>
+                </svg>
+            </div>
+            <div class="flex-1">
+                <h3 class="text-2xl font-bold mb-2">Expense Recommendation</h3>
+                <p class="text-blue-100 mb-4">
+                    Based on our analysis, here's the optimal payment strategy with your current budget of ₱${availableBudget.toFixed(2)}:
+                </p>
+                <div class="bg-white/10 rounded-xl p-4">
+                    <p class="font-semibold mb-2">Recommended Expenses to Pay:</p>
+                    ${recommendedExpenses.length === 0
+                ? '<p class="text-blue-100">Your budget is insufficient for any expenses.</p>'
+                : `<ul class="space-y-2">
+                                ${recommendedExpenses.map(e => `
+                                    <li class="flex justify-between">
+                                        <span>✓ ${e.name}</span>
+                                        <span class="font-semibold">₱${e.amount.toFixed(2)}</span>
+                                    </li>
+                                `).join('')}
+                               </ul>`
+        }
+                    <div class="mt-4 pt-4 border-t border-white/20">
+                        <div class="flex justify-between font-semibold">
+                            <span>Total Optimized Cost:</span>
+                            <span>₱${optimizedTotal.toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between text-blue-100 text-sm mt-1">
+                            <span>Remaining Budget:</span>
+                            <span>₱${(availableBudget - optimizedTotal).toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    }
+
+    // Render the expenses table (kept in separate function)
+    renderExpensesTable(optimizedIds);
+}
+
+// ==================== UPDATE EXPENSES TABLE (now a function) ====================
+
+function renderExpensesTable(optimizedIds = []) {
+    const tableContainer = document.getElementById('expensesTableContainer');
+    if (!tableContainer) return;
+
+    if (!Array.isArray(expenses) || expenses.length === 0) {
+        tableContainer.innerHTML = `
+        <div class="p-12 text-center">
+            <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z">
+                </path>
+            </svg>
+            <p class="text-gray-400 text-lg">No expenses recorded yet</p>
+        </div>
+    `;
+        return;
+    }
+
+    tableContainer.innerHTML = `
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="text-left py-4 px-6 text-gray-600 font-semibold">Expense Name</th>
+                        <th class="text-right py-4 px-6 text-gray-600 font-semibold">Amount</th>
+                        <th class="text-center py-4 px-6 text-gray-600 font-semibold">Due Date</th>
+                        <th class="text-center py-4 px-6 text-gray-600 font-semibold">Priority</th>
+                        <th class="text-center py-4 px-6 text-gray-600 font-semibold">AI Recommends</th>
+                        <th class="text-center py-4 px-6 text-gray-600 font-semibold">Status</th>
+                        <th class="text-center py-4 px-6 text-gray-600 font-semibold">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${expenses.map(expense => {
+        const daysUntilDue = getDaysUntilDue(expense.dueDate);
+        const isRecommended = optimizedIds.includes(expense.id);
+        const urgencyClass = getUrgencyClass(daysUntilDue);
+
+        return `
+                            <tr class="border-b border-gray-100 ${isRecommended && !expense.paid ? 'bg-blue-50' : ''}">
+                                
+                                <!-- Expense Name -->
+                                <td class="py-4 px-6">
+                                    <div class="flex items-center gap-2">
+                                        ${expense.paid
+                ? `<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                             d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z">
+                                                       </path>
+                                                   </svg>`
+                : ''
+            }
+                                        <span class="font-semibold ${expense.paid ? 'text-gray-400 line-through' : 'text-gray-800'}">
+                                            ${expense.name}
+                                        </span>
+                                    </div>
+                                </td>
+
+                                <!-- Amount -->
+                                <td class="py-4 px-6 text-right font-semibold text-gray-800">
+                                    ₱${expense.amount.toFixed(2)}
+                                </td>
+
+                                <!-- Due Date -->
+                                <td class="py-4 px-6 text-center">
+                                    <p class="text-gray-800">
+                                        ${new Date(expense.dueDate).toLocaleDateString()}
+                                    </p>
+                                    ${!expense.paid
+                ? `<p class="text-xs font-semibold ${urgencyClass} px-2 py-1 rounded inline-block mt-1">
+                                                   ${daysUntilDue < 0
+                    ? `${Math.abs(daysUntilDue)} days overdue`
+                    : `${daysUntilDue} days left`}
+                                               </p>`
+                : ''
+            }
+                                </td>
+
+                                <!-- Priority -->
+                                <td class="py-4 px-6 text-center">
+                                    <span class="text-yellow-500 text-lg">
+                                        ${getPriorityStars(expense.priority)}
+                                    </span>
+                                </td>
+
+                                <!-- AI Recommendation -->
+                                <td class="py-4 px-6 text-center">
+                                    ${!expense.paid && isRecommended
+                ? '<span class="bg-blue-500 text-white px-3 py-1 rounded-full text-sm font-semibold">✓ Recommended</span>'
+                : !expense.paid
+                    ? '<span class="text-gray-400 text-sm">Not in budget</span>'
+                    : '<span class="text-gray-400 text-sm">—</span>'
+            }
+                                </td>
+
+                                <!-- Status -->
+                                <td class="py-4 px-6 text-center">
+                                    <span class="px-3 py-1 rounded-full text-sm font-semibold ${expense.paid
+                ? 'bg-green-100 text-green-600'
+                : 'bg-red-100 text-red-600'
+            }">
+                                        ${expense.paid ? 'Paid' : 'Unpaid'}
+                                    </span>
+                                </td>
+
+                                <!-- Actions -->
+                                <td class="py-4 px-6 text-center">
+                                    <div class="flex gap-2 justify-center">
+                                        ${!expense.paid
+                ? `<button
+                                                       onclick="markExpensePaid(${expense.id})"
+                                                       class="bg-green-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:bg-green-600 transition-colors">
+                                                       Mark Paid
+                                                   </button>`
+                : ''
+            }
+                                        <button
+                                            onclick="deleteExpense(${expense.id})"
+                                            class="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:bg-red-600 transition-colors">
+                                            Delete
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 // ==================== NOTIFICATION SYSTEM ====================
 
 function showNotification(message, type = 'success') {
@@ -576,16 +1016,18 @@ window.addEventListener('kitako-data-changed', function () {
     if (typeof updateDashboard === 'function') updateDashboard();
     if (typeof updateUtangLogs === 'function') updateUtangLogs();
     if (typeof updateSalesTracker === 'function') updateSalesTracker();
+    if (typeof updateExpensesPage === 'function') updateExpensesPage();
 });
 
 // When localStorage changes in other tabs/windows, update UI here
 window.addEventListener('storage', function (e) {
-    if (e.key === 'kitako_utangs' || e.key === 'kitako_sales' || e.key === 'kitako_daily_goal') {
+    if (e.key === 'kitako_utangs' || e.key === 'kitako_sales' || e.key === 'kitako_daily_goal' || e.key === 'kitako_expenses' || e.key === 'kitako_budget') {
         refreshDataFromStorage();
 
         if (typeof updateDashboard === 'function') updateDashboard();
         if (typeof updateUtangLogs === 'function') updateUtangLogs();
         if (typeof updateSalesTracker === 'function') updateSalesTracker();
+        if (typeof updateExpensesPage === 'function') updateExpensesPage();
     }
 });
 
@@ -735,4 +1177,5 @@ document.addEventListener('DOMContentLoaded', function () {
     if (typeof updateDashboard === 'function') updateDashboard();
     if (typeof updateUtangLogs === 'function') updateUtangLogs();
     if (typeof updateSalesTracker === 'function') updateSalesTracker();
+    if (typeof updateExpensesPage === 'function') updateExpensesPage();
 });
