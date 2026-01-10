@@ -30,6 +30,12 @@ namespace KitaKo.Controllers
             return View();
         }
 
+        // Expense Priority Page (NEW)
+        public IActionResult ExpensePriority()
+        {
+            return View();
+        }
+
         // API endpoint to save sale (you can expand this later with database)
         [HttpPost]
         public JsonResult AddSale([FromBody] Sale sale)
