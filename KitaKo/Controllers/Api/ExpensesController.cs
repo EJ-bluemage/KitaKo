@@ -39,6 +39,9 @@ namespace KitaKo.Controllers
         public async Task<ActionResult<Expenses>> PostExpense(Expenses expense)
         {
             expense.CreatedDate = DateTime.UtcNow;
+            // Ensure DueDate is UTC
+            if (expense.DueDate.Kind == DateTimeKind.Unspecified)
+                expense.DueDate = DateTime.SpecifyKind(expense.DueDate, DateTimeKind.Utc);
             var createdExpense = await _repository.AddAsync(expense);
             return CreatedAtAction(nameof(GetExpense), new { id = createdExpense.Id }, createdExpense);
         }

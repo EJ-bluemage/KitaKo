@@ -39,6 +39,9 @@ namespace KitaKo.Controllers
         public async Task<ActionResult<Utang>> PostUtang(Utang utang)
         {
             utang.CreatedDate = DateTime.UtcNow;
+            // Ensure DueDate is UTC
+            if (utang.DueDate.Kind == DateTimeKind.Unspecified)
+                utang.DueDate = DateTime.SpecifyKind(utang.DueDate, DateTimeKind.Utc);
             var createdUtang = await _repository.AddAsync(utang);
             return CreatedAtAction(nameof(GetUtang), new { id = createdUtang.Id }, createdUtang);
         }
