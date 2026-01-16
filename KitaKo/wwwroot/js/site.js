@@ -1,4 +1,4 @@
-﻿// ==================== KitaKo JavaScript - Complete Application Logic ====================
+// ==================== KitaKo JavaScript - Complete Application Logic ====================
 // Client-side functionality with LocalStorage for data persistence
 
 // ==================== DATA STORAGE ====================
@@ -13,6 +13,19 @@ function refreshDataFromStorage() {
     utangs = JSON.parse(localStorage.getItem('kitako_utangs')) || [];
     expenses = JSON.parse(localStorage.getItem('kitako_expenses')) || expenses;
     availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || availableBudget;
+}
+
+// Refresh utangs from server
+async function refreshUtangsFromServer() {
+    try {
+        const response = await fetch('/api/utangs');
+        if (response.ok) {
+            const serverUtangs = await response.json();
+            utangs = serverUtangs;
+        }
+    } catch (error) {
+        console.error('Error fetching utangs from server:', error);
+    }
 }
 
 // Save data to localStorage
@@ -186,7 +199,7 @@ function getSalesByPeriod(period) {
 
 // ==================== UTANG FUNCTIONS ====================
 
-function addUtang() {
+async function addUtang() {
     const customerNameEl = document.getElementById('utangCustomerName');
     const amountEl = document.getElementById('utangAmount');
     const dueDateEl = document.getElementById('utangDueDate');
@@ -209,56 +222,65 @@ function addUtang() {
     }
 
     const utang = {
-        id: Date.now(),
         customerName: customerName,
         amount: amount,
         profit: profit || 0,
-        dueDate: dueDate,
-        createdDate: new Date().toISOString()
+        dueDate: dueDate
     };
 
-    utangs.push(utang);
-    saveUtangs();
-    closeUtangModal();
+    try {
+        const response = await fetch('/api/utangs', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(utang)
+        });
 
-    // Update UI based on current page
-    if (typeof updateDashboard === 'function') updateDashboard();
-    if (typeof updateUtangLogs === 'function') updateUtangLogs();
+        if (response.ok) {
+            const newUtang = await response.json();
+            // Refresh data from server
+            await refreshUtangsFromServer();
+            closeUtangModal();
+            
+            // Update UI based on current page
+            if (typeof updateDashboard === 'function') updateDashboard();
+            if (typeof updateUtangLogs === 'function') updateUtangLogs();
 
-    showNotification('Utang added successfully!', 'success');
+            showNotification('Utang added successfully!', 'success');
+        } else {
+            alert('Failed to add utang. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error adding utang:', error);
+        alert('Error adding utang. Please try again.');
+    }
 }
 
-function markUtangPaid(id) {
-    // No confirmation prompt — marking as paid immediately converts utang into a sale
-    refreshDataFromStorage(); // ensure we're using latest state
-    const idx = utangs.findIndex(u => u.id === id);
-    if (idx === -1) return;
+async function markUtangPaid(id) {
+    try {
+        // Delete utang from server
+        const response = await fetch(`/api/utangs/${id}`, {
+            method: 'DELETE'
+        });
 
-    const utang = utangs[idx];
+        if (response.ok) {
+            // Refresh utangs from server
+            await refreshUtangsFromServer();
+            
+            // Update UI based on current page
+            if (typeof updateDashboard === 'function') updateDashboard();
+            if (typeof updateUtangLogs === 'function') updateUtangLogs();
+            if (typeof updateSalesTracker === 'function') updateSalesTracker();
 
-    // Convert utang into a sale record using stored profit
-    const sale = {
-        id: Date.now(),
-        amount: utang.amount,
-        profit: typeof utang.profit === 'number' ? utang.profit : 0,
-        description: `Paid utang - ${utang.customerName}`,
-        date: new Date().toISOString()
-    };
-
-    // Add sale and remove utang
-    sales.push(sale);
-    saveSales();
-
-    // remove utang from in-memory then persist
-    utangs.splice(idx, 1);
-    saveUtangs();
-
-    // Update UI based on current page
-    if (typeof updateDashboard === 'function') updateDashboard();
-    if (typeof updateUtangLogs === 'function') updateUtangLogs();
-    if (typeof updateSalesTracker === 'function') updateSalesTracker();
-
-    showNotification('Utang marked as paid and recorded as sale!', 'success');
+            showNotification('Utang marked as paid!', 'success');
+        } else {
+            alert('Failed to mark utang as paid. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error marking utang as paid:', error);
+        alert('Error marking utang as paid. Please try again.');
+    }
 }
 
 function getUpcomingUtangs() {
@@ -285,16 +307,29 @@ function getUtangStatus(dueDate) {
 // ==================== DASHBOARD UPDATES ====================
 
 function updateDashboard() {
-    refreshDataFromStorage();
+    // Fetch from server first, then update UI
+    fetch('/api/utangs')
+        .then(response => response.ok ? response.json() : utangs)
+        .then(serverUtangs => {
+            utangs = serverUtangs;
+            renderDashboard();
+        })
+        .catch(() => {
+            // Fallback to localStorage data
+            refreshDataFromStorage();
+            renderDashboard();
+        });
+}
 
+function renderDashboard() {
     // Calculate totals
     const totalSales = sales.reduce((sum, sale) => sum + sale.amount, 0);
     const totalProfit = sales.reduce((sum, sale) => sum + sale.profit, 0);
     const dailyGoal = getDailyGoal();
     const progress = Math.min((totalSales / dailyGoal) * 100, 100);
 
-    // Loss is now derived from outstanding utangs (sum of amounts)
-    const totalLoss = utangs.reduce((sum, u) => sum + u.amount, 0);
+    // Loss is now derived from outstanding utangs (sum of CURRENT amounts with aging)
+    const totalLoss = utangs.reduce((sum, u) => sum + getCurrentAmount(u), 0);
 
     // Update stats cards
     const totalSalesCountEl = document.getElementById('totalSalesCount');
@@ -324,7 +359,7 @@ function updateDashboard() {
     const progressText = document.getElementById('progressText');
     if (progressText) progressText.textContent = `₱${totalSales.toFixed(0)} / ₱${Number(dailyGoal).toFixed(0)}`;
 
-    // Update upcoming utangs
+    // Update upcoming utangs (show current amount with aging)
     const upcomingUtangs = getUpcomingUtangs();
     const utangContainer = document.getElementById('upcomingUtangs');
 
@@ -332,18 +367,31 @@ function updateDashboard() {
         if (upcomingUtangs.length === 0) {
             utangContainer.innerHTML = '<p class="text-gray-400 text-center py-8">No upcoming utangs</p>';
         } else {
-            utangContainer.innerHTML = upcomingUtangs.map(utang => `
+            utangContainer.innerHTML = upcomingUtangs.map(utang => {
+                const currentAmount = getCurrentAmount(utang);
+                const penalty = getPenaltyAmount(utang);
+                const hasAging = penalty > 0;
+
+                return `
                 <div class="flex justify-between items-center p-3 bg-orange-50 rounded-lg mb-3">
                     <div>
                         <p class="font-semibold text-gray-800">${utang.customerName}</p>
-                        <p class="text-sm text-gray-500">₱${utang.amount.toFixed(2)}</p>
+                        <p class="text-sm text-gray-500">
+                            ${hasAging ?
+                        `<span class="line-through">₱${utang.amount.toFixed(2)}</span> 
+                                 <span class="text-red-600 font-bold">₱${currentAmount.toFixed(2)}</span>` :
+                        `₱${utang.amount.toFixed(2)}`
+                    }
+                        </p>
+                        ${hasAging ? `<p class="text-xs text-red-500">+₱${penalty.toFixed(2)} penalty</p>` : ''}
                     </div>
                     <div class="text-right">
                         <p class="text-sm text-red-500 font-medium">Due</p>
                         <p class="text-xs text-gray-500">${new Date(utang.dueDate).toLocaleDateString()}</p>
                     </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
         }
     }
 
@@ -450,7 +498,21 @@ function updateSalesTracker() {
 
 function updateUtangLogs() {
     refreshDataFromStorage();
+    
+    // Try to fetch from server, fallback to localStorage
+    fetch('/api/utangs')
+        .then(response => response.ok ? response.json() : utangs)
+        .then(serverUtangs => {
+            utangs = serverUtangs;
+            renderUtangLogs();
+        })
+        .catch(() => {
+            // Fallback to localStorage data
+            renderUtangLogs();
+        });
+}
 
+function renderUtangLogs() {
     const tableContainer = document.getElementById('utangTableContainer');
 
     if (!tableContainer) return;
@@ -473,18 +535,20 @@ function updateUtangLogs() {
                 <div class="overflow-x-auto">
                 <table class="w-full table-auto">
                     <colgroup>
-                        <col style="width:28%">
-                        <col style="width:14%">
-                        <col style="width:14%">
-                        <col style="width:18%">
+                        <col style="width:22%">
+                        <col style="width:13%">
+                        <col style="width:13%">
+                        <col style="width:13%">
+                        <col style="width:13%">
                         <col style="width:13%">
                         <col style="width:13%">
                     </colgroup>
                     <thead class="bg-orange-500 text-white">
                         <tr>
                             <th class="text-left py-4 px-6 font-semibold">Customer Name</th>
-                            <th class="text-right py-4 px-6 font-semibold">Amount</th>
-                            <th class="text-right py-4 px-6 font-semibold">Potential Profit</th>
+                            <th class="text-right py-4 px-6 font-semibold">Original Amount</th>
+                            <th class="text-right py-4 px-6 font-semibold">Current Amount</th>
+                            <th class="text-right py-4 px-6 font-semibold">Penalty</th>
                             <th class="text-center py-4 px-6 font-semibold">Due Date</th>
                             <th class="text-center py-4 px-6 font-semibold">Status</th>
                             <th class="text-center py-4 px-6 font-semibold">Action</th>
@@ -493,12 +557,22 @@ function updateUtangLogs() {
                     <tbody>
                         ${sortedUtangs.map(utang => {
             const status = getUtangStatus(utang.dueDate);
-            const profitDisplay = typeof utang.profit === 'number' ? `₱${utang.profit.toFixed(2)}` : '₱0.00';
+            const currentAmount = getCurrentAmount(utang);
+            const penalty = getPenaltyAmount(utang);
+            const monthsOverdue = getMonthsOverdue(utang.dueDate);
+            const hasAging = penalty > 0;
+
             return `
                                 <tr class="border-b border-gray-100 hover:bg-gray-50">
                                     <td class="py-4 px-6 font-semibold text-gray-800">${utang.customerName}</td>
-                                    <td class="py-4 px-6 text-right font-semibold text-gray-800">₱${utang.amount.toFixed(2)}</td>
-                                    <td class="py-4 px-6 text-right text-gray-700 font-medium">${profitDisplay}</td>
+                                    <td class="py-4 px-6 text-right text-gray-600">₱${utang.amount.toFixed(2)}</td>
+                                    <td class="py-4 px-6 text-right font-bold ${hasAging ? 'text-red-600' : 'text-gray-800'}">
+                                        ₱${currentAmount.toFixed(2)}
+                                        ${hasAging ? `<span class="text-xs block text-red-500">(${monthsOverdue} mo. overdue)</span>` : ''}
+                                    </td>
+                                    <td class="py-4 px-6 text-right ${hasAging ? 'text-red-600 font-bold' : 'text-gray-500'}">
+                                        ${hasAging ? `+₱${penalty.toFixed(2)}` : '₱0.00'}
+                                    </td>
                                     <td class="py-4 px-6 text-center text-gray-600">${new Date(utang.dueDate).toLocaleDateString()}</td>
                                     <td class="py-4 px-6 text-center">
                                         <span class="px-3 py-1 rounded-full text-sm font-semibold ${status.class}">
@@ -521,8 +595,8 @@ function updateUtangLogs() {
         `;
     }
 
-    // Update summary
-    const totalAmount = utangs.reduce((sum, u) => sum + u.amount, 0);
+    // Update summary (use current amounts with aging)
+    const totalAmount = utangs.reduce((sum, u) => sum + getCurrentAmount(u), 0);
     const dueSoonCount = getUpcomingUtangs().length;
 
     const totalUtangCountEl = document.getElementById('totalUtangCount');
