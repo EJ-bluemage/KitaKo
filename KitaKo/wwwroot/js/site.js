@@ -717,13 +717,34 @@ function addExpense() {
 }
 
 function markExpensePaid(id) {
-    expenses = expenses.map(expense =>
-        expense.id === id ? { ...expense, paid: true } : expense
-    );
+    // Ensure latest state
+    refreshDataFromStorage();
 
+    const idx = expenses.findIndex(e => e.id === id);
+    if (idx === -1) return;
+
+    const expense = expenses[idx];
+
+    // If already paid, do nothing (avoid double-subtracting)
+    if (expense.paid) {
+        showNotification('Expense already marked as paid', 'success');
+        return;
+    }
+
+    // Subtract expense amount from budget and persist
+    const amt = parseFloat(expense.amount) || 0;
+    availableBudget = parseFloat(availableBudget) || 0;
+    // Prevent negative budget (clamp to 0). Remove Math.max(...) if you want negatives allowed.
+    availableBudget = Math.max(0, availableBudget - amt);
+    saveBudget();
+
+    // Mark expense as paid and persist
+    expenses[idx] = { ...expense, paid: true };
     saveExpenses();
+
+    // Refresh UI
     updateExpensesPage();
-    showNotification('Expense marked as paid!', 'success');
+    showNotification(`Expense marked as paid. Budget reduced by ₱${amt.toFixed(2)}.`, 'success');
 }
 
 function deleteExpense(id) {
