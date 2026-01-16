@@ -69,7 +69,7 @@ namespace KitaKo.Controllers
             return View();
         }
 
-        // API endpoint to save sale (you can expand this later with database)
+        // API endpoint to save sale (connect with database)
         [HttpPost]
         public JsonResult AddSale([FromBody] Sale sale)
         {
@@ -125,14 +125,14 @@ namespace KitaKo.Controllers
             return Json(new { success = true });
         }
 
-        // GET: Login
+        //Go to Login
         [HttpGet]
         public IActionResult Login()
         {
             return View();
         }
 
-        // POST: Login
+        //Login
         [HttpPost]
         public IActionResult Login(LoginViewModel model)
         {
@@ -154,14 +154,14 @@ namespace KitaKo.Controllers
             return View(model);
         }
 
-        // GET: Signup
+        //Go to Signup
         [HttpGet]
         public IActionResult Signup()
         {
             return View();
         }
 
-        // POST: Signup
+        //Signup
         [HttpPost]
         public IActionResult Signup(SignupViewModel model)
         {
@@ -193,9 +193,134 @@ namespace KitaKo.Controllers
             TempData["SuccessMessage"] = "You have been logged out successfully.";
             return RedirectToAction("Index");
         }
+
+        // GET: Profile
+        public IActionResult Profile()
+        {
+            var userIdStr = HttpContext.Session.GetString("UserId");
+            if (string.IsNullOrEmpty(userIdStr))
+            {
+                return RedirectToAction("Login");
+            }
+
+            var userId = int.Parse(userIdStr);
+            var user = _authService.GetUserById(userId);
+
+            if (user == null)
+            {
+                return RedirectToAction("Login");
+            }
+
+            return View(user);
+        }
+
+        // GET: Edit Profile
+        [HttpGet]
+        public IActionResult EditProfile()
+        {
+            var userIdStr = HttpContext.Session.GetString("UserId");
+            if (string.IsNullOrEmpty(userIdStr))
+            {
+                return RedirectToAction("Login");
+            }
+
+            var userId = int.Parse(userIdStr);
+            var user = _authService.GetUserById(userId);
+
+            if (user == null)
+            {
+                return RedirectToAction("Login");
+            }
+
+            var model = new ProfileEditViewModel
+            {
+                Username = user.Username,
+                StoreName = user.StoreName,
+                ProfilePhotoUrl = user.ProfilePhotoUrl
+            };
+
+            return View(model);
+        }
+
+
+
+        //Edit Profile
+        [HttpPost]
+        public IActionResult EditProfile(ProfileEditViewModel model)
+        {
+            var userIdStr = HttpContext.Session.GetString("UserId");
+            if (string.IsNullOrEmpty(userIdStr))
+            {
+                return RedirectToAction("Login");
+            }
+
+            var userId = int.Parse(userIdStr);
+
+            // Get current user data
+            var currentUser = _authService.GetUserById(userId);
+            if (currentUser == null)
+            {
+                return RedirectToAction("Login");
+            }
+
+            //update username if it's provided and different
+            string usernameToUpdate = string.IsNullOrWhiteSpace(model.Username)
+                ? currentUser.Username
+                : model.Username.Trim();
+
+            //update store name if it's provided
+            string storeNameToUpdate = model.StoreName ?? currentUser.StoreName;
+
+            //update photo if it's provided
+            string photoUrlToUpdate = currentUser.ProfilePhotoUrl; // Default to existing photo
+            if (model.ProfilePhoto != null && model.ProfilePhoto.Length > 0)
+            {
+                var photoUrl = _authService.SaveProfilePhoto(model.ProfilePhoto, userId);
+                if (!string.IsNullOrEmpty(photoUrl))
+                {
+                    photoUrlToUpdate = photoUrl;
+                }
+            }
+
+            //Update profile
+            var success = _authService.UpdateProfile(userId, usernameToUpdate, storeNameToUpdate, photoUrlToUpdate);
+
+            if (!success)
+            {
+                ModelState.AddModelError("", "Username already taken");
+                return View(model);
+            }
+
+            //BOTH current and new passwords must be providef
+            if (!string.IsNullOrEmpty(model.CurrentPassword) && !string.IsNullOrEmpty(model.NewPassword))
+            {
+                var passwordChanged = _authService.ChangePassword(userId, model.CurrentPassword, model.NewPassword);
+                if (!passwordChanged)
+                {
+                    ModelState.AddModelError("", "Current password is incorrect");
+                    //Reload the user data to show
+                    var updatedUser = _authService.GetUserById(userId);
+                    model.Username = updatedUser.Username;
+                    model.StoreName = updatedUser.StoreName;
+                    model.ProfilePhotoUrl = updatedUser.ProfilePhotoUrl;
+                    return View(model);
+                }
+            }
+
+            //Updated with new username
+            HttpContext.Session.SetString("Username", usernameToUpdate);
+            TempData["SuccessMessage"] = "Profile updated successfully!";
+            return RedirectToAction("Profile");
+        }
+
+        // About
+        public IActionResult About()
+        {
+            return View();
+        }
     }
 
-    // Request model for optimization
+    //Request model for optimization
     public class OptimizationRequest
     {
         public List<Expenses> Expenses { get; set; } = new List<Expenses>();

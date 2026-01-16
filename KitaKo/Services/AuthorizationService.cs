@@ -56,5 +56,68 @@ namespace KitaKo.Services
         {
             return HashPassword(password) == hash;
         }
+
+        public User GetUserById(int userId)
+        {
+            return _users.FirstOrDefault(u => u.Id == userId);
+        }
+
+        public bool UpdateProfile(int userId, string username, string storeName, string profilePhotoUrl)
+        {
+            var user = _users.FirstOrDefault(u => u.Id == userId);
+            if (user == null) return false;
+
+            // Check if username is taken by another user
+            if (_users.Any(u => u.Username == username && u.Id != userId))
+            {
+                return false;
+            }
+
+            user.Username = username;
+            user.StoreName = storeName;
+            user.ProfilePhotoUrl = profilePhotoUrl;
+            return true;
+        }
+
+        public bool ChangePassword(int userId, string currentPassword, string newPassword)
+        {
+            var user = _users.FirstOrDefault(u => u.Id == userId);
+            if (user == null) return false;
+
+            if (!VerifyPassword(currentPassword, user.PasswordHash))
+            {
+                return false;
+            }
+
+            user.PasswordHash = HashPassword(newPassword);
+            return true;
+        }
+
+        public string SaveProfilePhoto(IFormFile photo, int userId)
+        {
+            if (photo == null || photo.Length == 0)
+                return null;
+
+            // Create profiles folder if it doesn't exist
+            var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "profiles");
+            if (!Directory.Exists(uploadsFolder))
+            {
+                Directory.CreateDirectory(uploadsFolder);
+            }
+
+            // Generate filename
+            var fileExtension = Path.GetExtension(photo.FileName);
+            var fileName = $"user_{userId}_{Guid.NewGuid()}{fileExtension}";
+            var filePath = Path.Combine(uploadsFolder, fileName);
+
+            // Save file
+            using (var stream = new FileStream(filePath, FileMode.Create))
+            {
+                photo.CopyTo(stream);
+            }
+
+            // Return relative path for URL
+            return $"/uploads/profiles/{fileName}";
+        }
     }
 }
