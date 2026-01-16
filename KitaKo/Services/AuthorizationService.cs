@@ -27,7 +27,7 @@ namespace KitaKo.Services
                 Username = username,
                 Email = email,
                 PasswordHash = HashPassword(password),
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.UtcNow
             };
 
             _dbContext.Users.Add(user);
