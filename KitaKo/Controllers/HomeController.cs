@@ -75,32 +75,94 @@ namespace KitaKo.Controllers
         [HttpPost]
         public JsonResult AddSale([FromBody] Sale sale)
         {
-            // TODO: Save to database
-            return Json(new { success = true, sale });
+            try
+            {
+                var userId = HttpContext.Session.GetString("UserId");
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Json(new { success = false, message = "User not logged in" });
+                }
+
+                sale.UserId = int.Parse(userId);
+                sale.Date = DateTime.UtcNow;
+                _dbContext.Sales.Add(sale);
+                _dbContext.SaveChanges();
+                return Json(new { success = true, sale });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
         // API endpoint to save utang
         [HttpPost]
         public JsonResult AddUtang([FromBody] Utang utang)
         {
-            // TODO: Save to database
-            return Json(new { success = true, utang });
+            try
+            {
+                var userId = HttpContext.Session.GetString("UserId");
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Json(new { success = false, message = "User not logged in" });
+                }
+
+                utang.UserId = int.Parse(userId);
+                utang.CreatedDate = DateTime.UtcNow;
+                _dbContext.Utangs.Add(utang);
+                _dbContext.SaveChanges();
+                return Json(new { success = true, utang });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
         // API endpoint to mark utang as paid
         [HttpPost]
         public JsonResult MarkUtangPaid(int id)
         {
-            // TODO: Update in database
-            return Json(new { success = true });
+            try
+            {
+                var utang = _dbContext.Utangs.FirstOrDefault(u => u.Id == id);
+                if (utang == null)
+                {
+                    return Json(new { success = false, message = "Utang not found" });
+                }
+
+                utang.Paid = true;
+                _dbContext.SaveChanges();
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
         // API endpoint to add expense
         [HttpPost]
         public JsonResult AddExpense([FromBody] Expenses expense)
         {
-            // TODO: Save to database
-            return Json(new { success = true, expense });
+            try
+            {
+                var userId = HttpContext.Session.GetString("UserId");
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Json(new { success = false, message = "User not logged in" });
+                }
+
+                expense.UserId = int.Parse(userId);
+                expense.CreatedDate = DateTime.UtcNow;
+                _dbContext.Expenses.Add(expense);
+                _dbContext.SaveChanges();
+                return Json(new { success = true, expense });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
         // API endpoint to optimize expenses using Knapsack Algorithm
@@ -115,16 +177,44 @@ namespace KitaKo.Controllers
         [HttpPost]
         public JsonResult MarkExpensePaid(int id)
         {
-            // TODO: Update in database
-            return Json(new { success = true });
+            try
+            {
+                var expense = _dbContext.Expenses.FirstOrDefault(e => e.Id == id);
+                if (expense == null)
+                {
+                    return Json(new { success = false, message = "Expense not found" });
+                }
+
+                expense.Paid = true;
+                _dbContext.SaveChanges();
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
         // API endpoint to delete expense
         [HttpPost]
         public JsonResult DeleteExpense(int id)
         {
-            // TODO: Delete from database
-            return Json(new { success = true });
+            try
+            {
+                var expense = _dbContext.Expenses.FirstOrDefault(e => e.Id == id);
+                if (expense == null)
+                {
+                    return Json(new { success = false, message = "Expense not found" });
+                }
+
+                _dbContext.Expenses.Remove(expense);
+                _dbContext.SaveChanges();
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
         //Go to Login
