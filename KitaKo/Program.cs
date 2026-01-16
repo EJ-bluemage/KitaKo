@@ -1,3 +1,7 @@
+using Microsoft.EntityFrameworkCore;
+using KitaKo.Data;
+using KitaKo.Data.Repositories;
+
 namespace KitaKo
 {
     public class Program
@@ -5,6 +9,14 @@ namespace KitaKo
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            // Add DbContext with PostgreSQL
+            var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+            builder.Services.AddDbContext<ApplicationDbContext>(options =>
+                options.UseNpgsql(connectionString));
+
+            // Add generic repository
+            builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
             builder.Services.AddControllersWithViews();
 
