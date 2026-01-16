@@ -15,6 +15,19 @@ function refreshDataFromStorage() {
     availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || availableBudget;
 }
 
+// Refresh utangs from server
+async function refreshUtangsFromServer() {
+    try {
+        const response = await fetch('/api/utangs');
+        if (response.ok) {
+            const serverUtangs = await response.json();
+            utangs = serverUtangs;
+        }
+    } catch (error) {
+        console.error('Error fetching utangs from server:', error);
+    }
+}
+
 // Save data to localStorage
 function saveSales() {
     localStorage.setItem('kitako_sales', JSON.stringify(sales));
@@ -186,7 +199,7 @@ function getSalesByPeriod(period) {
 
 // ==================== UTANG FUNCTIONS ====================
 
-function addUtang() {
+async function addUtang() {
     const customerNameEl = document.getElementById('utangCustomerName');
     const amountEl = document.getElementById('utangAmount');
     const dueDateEl = document.getElementById('utangDueDate');
@@ -209,58 +222,65 @@ function addUtang() {
     }
 
     const utang = {
-        id: Date.now(),
         customerName: customerName,
         amount: amount,
         profit: profit || 0,
-        dueDate: dueDate,
-        createdDate: new Date().toISOString()
+        dueDate: dueDate
     };
 
-    utangs.push(utang);
-    saveUtangs();
-    closeUtangModal();
+    try {
+        const response = await fetch('/api/utangs', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(utang)
+        });
 
-    // Update UI based on current page
-    if (typeof updateDashboard === 'function') updateDashboard();
-    if (typeof updateUtangLogs === 'function') updateUtangLogs();
+        if (response.ok) {
+            const newUtang = await response.json();
+            // Refresh data from server
+            await refreshUtangsFromServer();
+            closeUtangModal();
+            
+            // Update UI based on current page
+            if (typeof updateDashboard === 'function') updateDashboard();
+            if (typeof updateUtangLogs === 'function') updateUtangLogs();
 
-    showNotification('Utang added successfully!', 'success');
+            showNotification('Utang added successfully!', 'success');
+        } else {
+            alert('Failed to add utang. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error adding utang:', error);
+        alert('Error adding utang. Please try again.');
+    }
 }
 
-function markUtangPaid(id) {
-    refreshDataFromStorage();
-    const idx = utangs.findIndex(u => u.id === id);
-    if (idx === -1) return;
+async function markUtangPaid(id) {
+    try {
+        // Delete utang from server
+        const response = await fetch(`/api/utangs/${id}`, {
+            method: 'DELETE'
+        });
 
-    const utang = utangs[idx];
+        if (response.ok) {
+            // Refresh utangs from server
+            await refreshUtangsFromServer();
+            
+            // Update UI based on current page
+            if (typeof updateDashboard === 'function') updateDashboard();
+            if (typeof updateUtangLogs === 'function') updateUtangLogs();
+            if (typeof updateSalesTracker === 'function') updateSalesTracker();
 
-    // Use the current amount (with aging penalty) when converting to sale
-    const currentAmount = getCurrentAmount(utang);
-
-    // Convert utang into a sale record using current amount (with penalties)
-    const sale = {
-        id: Date.now(),
-        amount: currentAmount,
-        profit: typeof utang.profit === 'number' ? utang.profit : 0,
-        description: `Paid utang - ${utang.customerName}`,
-        date: new Date().toISOString()
-    };
-
-    // Add sale and remove utang
-    sales.push(sale);
-    saveSales();
-
-    // remove utang from in-memory then persist
-    utangs.splice(idx, 1);
-    saveUtangs();
-
-    // Update UI based on current page
-    if (typeof updateDashboard === 'function') updateDashboard();
-    if (typeof updateUtangLogs === 'function') updateUtangLogs();
-    if (typeof updateSalesTracker === 'function') updateSalesTracker();
-
-    showNotification('Utang marked as paid and recorded as sale!', 'success');
+            showNotification('Utang marked as paid!', 'success');
+        } else {
+            alert('Failed to mark utang as paid. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error marking utang as paid:', error);
+        alert('Error marking utang as paid. Please try again.');
+    }
 }
 
 function getUpcomingUtangs() {
@@ -287,8 +307,21 @@ function getUtangStatus(dueDate) {
 // ==================== DASHBOARD UPDATES ====================
 
 function updateDashboard() {
-    refreshDataFromStorage();
+    // Fetch from server first, then update UI
+    fetch('/api/utangs')
+        .then(response => response.ok ? response.json() : utangs)
+        .then(serverUtangs => {
+            utangs = serverUtangs;
+            renderDashboard();
+        })
+        .catch(() => {
+            // Fallback to localStorage data
+            refreshDataFromStorage();
+            renderDashboard();
+        });
+}
 
+function renderDashboard() {
     // Calculate totals
     const totalSales = sales.reduce((sum, sale) => sum + sale.amount, 0);
     const totalProfit = sales.reduce((sum, sale) => sum + sale.profit, 0);
@@ -465,7 +498,21 @@ function updateSalesTracker() {
 
 function updateUtangLogs() {
     refreshDataFromStorage();
+    
+    // Try to fetch from server, fallback to localStorage
+    fetch('/api/utangs')
+        .then(response => response.ok ? response.json() : utangs)
+        .then(serverUtangs => {
+            utangs = serverUtangs;
+            renderUtangLogs();
+        })
+        .catch(() => {
+            // Fallback to localStorage data
+            renderUtangLogs();
+        });
+}
 
+function renderUtangLogs() {
     const tableContainer = document.getElementById('utangTableContainer');
 
     if (!tableContainer) return;
@@ -744,13 +791,34 @@ function addExpense() {
 }
 
 function markExpensePaid(id) {
-    expenses = expenses.map(expense =>
-        expense.id === id ? { ...expense, paid: true } : expense
-    );
+    // Ensure latest state
+    refreshDataFromStorage();
 
+    const idx = expenses.findIndex(e => e.id === id);
+    if (idx === -1) return;
+
+    const expense = expenses[idx];
+
+    // If already paid, do nothing (avoid double-subtracting)
+    if (expense.paid) {
+        showNotification('Expense already marked as paid', 'success');
+        return;
+    }
+
+    // Subtract expense amount from budget and persist
+    const amt = parseFloat(expense.amount) || 0;
+    availableBudget = parseFloat(availableBudget) || 0;
+    // Prevent negative budget (clamp to 0). Remove Math.max(...) if you want negatives allowed.
+    availableBudget = Math.max(0, availableBudget - amt);
+    saveBudget();
+
+    // Mark expense as paid and persist
+    expenses[idx] = { ...expense, paid: true };
     saveExpenses();
+
+    // Refresh UI
     updateExpensesPage();
-    showNotification('Expense marked as paid!', 'success');
+    showNotification(`Expense marked as paid. Budget reduced by ₱${amt.toFixed(2)}.`, 'success');
 }
 
 function deleteExpense(id) {
