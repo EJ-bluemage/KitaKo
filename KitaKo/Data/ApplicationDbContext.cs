@@ -9,6 +9,7 @@ namespace KitaKo.Data
         {
         }
 
+        public DbSet<User> Users { get; set; }
         public DbSet<Expenses> Expenses { get; set; }
         public DbSet<Sale> Sales { get; set; }
         public DbSet<Utang> Utangs { get; set; }
@@ -16,6 +17,18 @@ namespace KitaKo.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            // Configure User table
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Username).HasMaxLength(100).IsRequired();
+                entity.Property(e => e.Email).HasMaxLength(255).IsRequired();
+                entity.Property(e => e.PasswordHash).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+                entity.HasIndex(e => e.Username).IsUnique();
+                entity.HasIndex(e => e.Email).IsUnique();
+            });
 
             // Configure Expenses table
             modelBuilder.Entity<Expenses>(entity =>

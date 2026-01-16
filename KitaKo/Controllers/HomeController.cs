@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using KitaKo.Models;
 using KitaKo.Services;
+using KitaKo.Data;
 using System.Collections.Generic;
 
 namespace KitaKo.Controllers
@@ -8,13 +9,14 @@ namespace KitaKo.Controllers
     public class HomeController : Controller
     {
         private readonly KnapsackService _knapsackService;
-
         private readonly AuthService _authService;
+        private readonly ApplicationDbContext _dbContext;
 
-        public HomeController()
+        public HomeController(ApplicationDbContext dbContext)
         {
             _knapsackService = new KnapsackService();
-            _authService = new AuthService();
+            _dbContext = dbContext;
+            _authService = new AuthService(dbContext);
         }
 
         // Landing Page

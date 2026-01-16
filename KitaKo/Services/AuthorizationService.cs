@@ -1,4 +1,5 @@
 ﻿using KitaKo.Models;
+using KitaKo.Data;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -6,33 +7,37 @@ namespace KitaKo.Services
 {
     public class AuthService
     {
-        //In-memory user storage (replace with database) DITO DATABASE
-        private static List<User> _users = new List<User>();
+        private readonly ApplicationDbContext _dbContext;
+
+        public AuthService(ApplicationDbContext dbContext)
+        {
+            _dbContext = dbContext;
+        }
 
         public User Register(string username, string email, string password)
         {
             //To check if user already exists
-            if (_users.Any(u => u.Email == email || u.Username == username))
+            if (_dbContext.Users.Any(u => u.Email == email || u.Username == username))
             {
                 return null;
             }
 
             var user = new User
             {
-                Id = _users.Count + 1,
                 Username = username,
                 Email = email,
                 PasswordHash = HashPassword(password),
                 CreatedAt = DateTime.Now
             };
 
-            _users.Add(user);
+            _dbContext.Users.Add(user);
+            _dbContext.SaveChanges();
             return user;
         }
 
         public User Login(string emailOrUsername, string password)
         {
-            var user = _users.FirstOrDefault(u =>
+            var user = _dbContext.Users.FirstOrDefault(u =>
                 u.Email == emailOrUsername || u.Username == emailOrUsername);
 
             if (user != null && VerifyPassword(password, user.PasswordHash))
@@ -59,16 +64,16 @@ namespace KitaKo.Services
 
         public User GetUserById(int userId)
         {
-            return _users.FirstOrDefault(u => u.Id == userId);
+            return _dbContext.Users.FirstOrDefault(u => u.Id == userId);
         }
 
         public bool UpdateProfile(int userId, string username, string storeName, string profilePhotoUrl)
         {
-            var user = _users.FirstOrDefault(u => u.Id == userId);
+            var user = _dbContext.Users.FirstOrDefault(u => u.Id == userId);
             if (user == null) return false;
 
             // Check if username is taken by another user
-            if (_users.Any(u => u.Username == username && u.Id != userId))
+            if (_dbContext.Users.Any(u => u.Username == username && u.Id != userId))
             {
                 return false;
             }
@@ -76,12 +81,13 @@ namespace KitaKo.Services
             user.Username = username;
             user.StoreName = storeName;
             user.ProfilePhotoUrl = profilePhotoUrl;
+            _dbContext.SaveChanges();
             return true;
         }
 
         public bool ChangePassword(int userId, string currentPassword, string newPassword)
         {
-            var user = _users.FirstOrDefault(u => u.Id == userId);
+            var user = _dbContext.Users.FirstOrDefault(u => u.Id == userId);
             if (user == null) return false;
 
             if (!VerifyPassword(currentPassword, user.PasswordHash))
@@ -90,6 +96,7 @@ namespace KitaKo.Services
             }
 
             user.PasswordHash = HashPassword(newPassword);
+            _dbContext.SaveChanges();
             return true;
         }
 
