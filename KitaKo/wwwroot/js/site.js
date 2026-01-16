@@ -18,10 +18,15 @@ function refreshDataFromStorage() {
 // Refresh utangs from server
 async function refreshUtangsFromServer() {
     try {
-        const response = await fetch('/api/utangs');
+        const response = await fetch('/api/utangs', { credentials: 'same-origin' });
+        if (response.status === 401) {
+            console.warn('Not authenticated when fetching utangs (server returned 401).');
+            return;
+        }
         if (response.ok) {
             const serverUtangs = await response.json();
             utangs = serverUtangs;
+            saveUtangs();
         }
     } catch (error) {
         console.error('Error fetching utangs from server:', error);
@@ -31,14 +36,10 @@ async function refreshUtangsFromServer() {
 // Save data to localStorage
 function saveSales() {
     localStorage.setItem('kitako_sales', JSON.stringify(sales));
-    // notify other listeners/pages in same window
-    window.dispatchEvent(new Event('kitako-data-changed'));
 }
 
 function saveUtangs() {
     localStorage.setItem('kitako_utangs', JSON.stringify(utangs));
-    // notify other listeners/pages in same window
-    window.dispatchEvent(new Event('kitako-data-changed'));
 }
 
 // ==================== DAILY GOAL PERSISTENCE ====================
@@ -234,8 +235,14 @@ async function addUtang() {
             headers: {
                 'Content-Type': 'application/json'
             },
+            credentials: 'same-origin',
             body: JSON.stringify(utang)
         });
+
+        if (response.status === 401) {
+            alert('You are not logged in. Please login to add utangs.');
+            return;
+        }
 
         if (response.ok) {
             const newUtang = await response.json();
@@ -257,41 +264,79 @@ async function addUtang() {
     }
 }
 
+// ==================== UTANGS MANAGEMENT ====================
+
 async function markUtangPaid(id) {
     try {
+        // Confirm action
+        if (!confirm('Are you sure you want to mark this utang as paid?')) {
+            return;
+        }
+
+        // Find the utang to get its details
+        const utang = utangs.find(u => u.id === id);
+        if (!utang) {
+            alert('Utang not found.');
+            return;
+        }
+
         // Delete utang from server
-        const response = await fetch(`/api/utangs/${id}`, {
-            method: 'DELETE'
+        const deleteResponse = await fetch(`/api/utangs/${id}`, {
+            method: 'DELETE',
+            credentials: 'same-origin'
         });
 
-        if (response.ok) {
-            // Refresh utangs from server
-            await refreshUtangsFromServer();
-            
-            // Update UI based on current page
-            if (typeof updateDashboard === 'function') updateDashboard();
-            if (typeof updateUtangLogs === 'function') updateUtangLogs();
-            if (typeof updateSalesTracker === 'function') updateSalesTracker();
-
-            showNotification('Utang marked as paid!', 'success');
-        } else {
-            alert('Failed to mark utang as paid. Please try again.');
+        if (deleteResponse.status === 401) {
+            alert('You are not logged in.');
+            return;
         }
+
+        if (!deleteResponse.ok) {
+            alert('Failed to mark utang as paid.');
+            return;
+        }
+
+        // Utang deleted successfully - remove from local array
+        utangs = utangs.filter(u => u.id !== id);
+
+        // Create sale on server
+        const saleData = {
+            amount: parseFloat(utang.amount),
+            profit: 0,
+            description: `Payment from ${utang.customerName}`
+        };
+
+        const saleResponse = await fetch('/api/sales', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(saleData)
+        });
+
+        if (saleResponse.ok) {
+            const createdSale = await saleResponse.json();
+            sales.push(createdSale);
+        }
+
+        // Save to localStorage without triggering events
+        localStorage.setItem('kitako_utangs', JSON.stringify(utangs));
+        localStorage.setItem('kitako_sales', JSON.stringify(sales));
+
+        // Update UI on current page only
+        if (document.getElementById('utangTableContainer')) {
+            renderUtangLogs();
+        }
+
+        showNotification('Utang marked as paid and added to sales!', 'success');
     } catch (error) {
-        console.error('Error marking utang as paid:', error);
-        alert('Error marking utang as paid. Please try again.');
+        console.error('Error:', error);
+        alert('Error: ' + error.message);
     }
 }
 
 function getUpcomingUtangs() {
-    const today = new Date();
-    const threeDaysFromNow = new Date(today);
-    threeDaysFromNow.setDate(today.getDate() + 3);
-
-    return utangs.filter(utang => {
-        const dueDate = new Date(utang.dueDate);
-        return dueDate >= today && dueDate <= threeDaysFromNow;
-    }).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    // Return all utangs sorted by due date
+    return utangs.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 }
 
 function getUtangStatus(dueDate) {
@@ -500,10 +545,19 @@ function updateUtangLogs() {
     refreshDataFromStorage();
     
     // Try to fetch from server, fallback to localStorage
-    fetch('/api/utangs')
-        .then(response => response.ok ? response.json() : utangs)
+    fetch('/api/utangs', { credentials: 'same-origin' })
+        .then(response => {
+            if (response.status === 401) {
+                console.warn('Not authenticated when fetching utang logs (server returned 401).');
+                return utangs;
+            }
+            return response.ok ? response.json() : utangs;
+        })
         .then(serverUtangs => {
-            utangs = serverUtangs;
+            if (Array.isArray(serverUtangs)) {
+                utangs = serverUtangs;
+                saveUtangs();
+            }
             renderUtangLogs();
         })
         .catch(() => {
@@ -1260,6 +1314,85 @@ function restoreData(fileInput) {
         }
     };
     reader.readAsText(file);
+}
+
+// ==================== HELPER FUNCTIONS FOR UTANG AGING ====================
+
+// Helper function: Get current amount with aging for a utang
+function getCurrentAmount(utang) {
+    const dueDate = new Date(utang.dueDate);
+    const today = new Date();
+
+    // If not yet due, return original amount
+    if (dueDate >= today) {
+        return utang.amount;
+    }
+
+    // Calculate penalty based on how many complete months overdue
+    const penalty = getPenaltyAmount(utang);
+    return utang.amount + penalty;
+}
+
+// Helper function: Calculate penalty amount
+function getPenaltyAmount(utang) {
+    const dueDate = new Date(utang.dueDate);
+    const today = new Date();
+
+    if (dueDate >= today) {
+        return 0; // Not yet due, no penalty
+    }
+
+    // Calculate full months overdue
+    let monthsOverdue = 0;
+    let current = new Date(dueDate);
+    while (current < today) {
+        current.setMonth(current.getMonth() + 1);
+        if (current <= today) {
+            monthsOverdue++;
+        }
+    }
+
+    // 5% penalty per full month overdue
+    const penaltyRate = 0.05;
+    return utang.amount * penaltyRate * monthsOverdue;
+}
+
+// Helper function: Get months overdue
+function getMonthsOverdue(dueDate) {
+    const due = new Date(dueDate);
+    const today = new Date();
+
+    if (due >= today) {
+        return 0;
+    }
+
+    let months = 0;
+    let current = new Date(due);
+    while (current < today) {
+        current.setMonth(current.getMonth() + 1);
+        if (current <= today) {
+            months++;
+        }
+    }
+
+    return months;
+}
+
+// Notification system
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg text-white font-semibold ${
+        type === 'success' ? 'bg-green-500' : 
+        type === 'error' ? 'bg-red-500' : 
+        'bg-blue-500'
+    } shadow-lg z-50`;
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
 }
 
 // ==================== INITIALIZE ON PAGE LOAD ====================

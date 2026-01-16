@@ -19,8 +19,15 @@ namespace KitaKo.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Sale>>> GetSales()
         {
+            var userIdStr = HttpContext.Session.GetString("UserId");
+            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out int userId))
+            {
+                return Unauthorized();
+            }
+
             var sales = await _repository.GetAllAsync();
-            return Ok(sales);
+            var userSales = sales.Where(s => s.UserId == userId).ToList();
+            return Ok(userSales);
         }
 
         // GET: api/sales/5
@@ -38,6 +45,13 @@ namespace KitaKo.Controllers
         [HttpPost]
         public async Task<ActionResult<Sale>> PostSale(Sale sale)
         {
+            var userIdStr = HttpContext.Session.GetString("UserId");
+            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out int userId))
+            {
+                return Unauthorized();
+            }
+
+            sale.UserId = userId;
             sale.Date = DateTime.UtcNow;
             var createdSale = await _repository.AddAsync(sale);
             return CreatedAtAction(nameof(GetSale), new { id = createdSale.Id }, createdSale);
