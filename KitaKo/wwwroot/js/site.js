@@ -664,16 +664,10 @@ function renderUtangLogs() {
 
 // ==================== EXPENSES & KNAPSACK ALGORITHM ====================
 
-// Load expenses from localStorage or use defaults
-let expenses = JSON.parse(localStorage.getItem('kitako_expenses')) || [
-    { id: 1, name: 'Grocery Restock', amount: 5000, dueDate: '2026-01-15', priority: 5, paid: false },
-    { id: 2, name: 'Water Bill', amount: 500, dueDate: '2026-01-20', priority: 4, paid: false },
-    { id: 3, name: 'Electric Bill', amount: 1500, dueDate: '2026-01-18', priority: 4, paid: false },
-    { id: 4, name: 'Rent', amount: 3000, dueDate: '2026-01-25', priority: 5, paid: false }
-];
+
 
 // Load available budget
-let availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || 8000;
+let availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || 0;
 
 // ==================== LOCAL STORAGE HELPERS ====================
 
@@ -687,7 +681,7 @@ function saveBudget() {
     localStorage.setItem('kitako_budget', availableBudget.toString());
     window.dispatchEvent(new Event('kitako-data-changed'));
 }
-
+sto
 // New function: clear expenses and budget so user can start fresh
 function clearExpensesAndBudget() {
     if (!confirm('Clear ALL expenses and reset the budget to ₱0? This cannot be undone.')) return;
@@ -1016,13 +1010,30 @@ function renderExpensesTable(optimizedIds = []) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${expenses.map(expense => {
+                    ${[...expenses].sort((a, b) => {
+        // Unpaid items first
+        if (a.paid !== b.paid) {
+            return a.paid ? 1 : -1; // unpaid (false) comes first
+        }
+        // If both are unpaid: higher priority first, then earlier due date
+        if (!a.paid && !b.paid) {
+            if (a.priority !== b.priority) return b.priority - a.priority; // desc priority
+            return new Date(a.dueDate) - new Date(b.dueDate);
+        }
+        // If both are paid (or same status but not unpaid case), sort by due date
+        return new Date(a.dueDate) - new Date(b.dueDate);
+    }).map(expense => {
         const daysUntilDue = getDaysUntilDue(expense.dueDate);
         const isRecommended = optimizedIds.includes(expense.id);
         const urgencyClass = getUrgencyClass(daysUntilDue);
 
+        // Row classes: unpaid rows get a light highlight; recommended stays blue
+        const rowClasses = ['border-b', 'border-gray-100'];
+        if (!expense.paid) rowClasses.push('bg-yellow-50');
+        if (isRecommended && !expense.paid) rowClasses.push('bg-blue-50');
+
         return `
-                            <tr class="border-b border-gray-100 ${isRecommended && !expense.paid ? 'bg-blue-50' : ''}">
+                            <tr class="${rowClasses.join(' ')}">
                                 
                                 <!-- Expense Name -->
                                 <td class="py-4 px-6">

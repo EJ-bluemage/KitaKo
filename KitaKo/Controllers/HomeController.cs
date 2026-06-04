@@ -326,7 +326,7 @@ namespace KitaKo.Controllers
 
             var model = new ProfileEditViewModel
             {
-                Username = user.Username,
+                Username = user.Username ?? string.Empty,
                 StoreName = user.StoreName,
                 ProfilePhotoUrl = user.ProfilePhotoUrl
             };
@@ -361,10 +361,10 @@ namespace KitaKo.Controllers
                 : model.Username.Trim();
 
             //update store name if it's provided
-            string storeNameToUpdate = model.StoreName ?? currentUser.StoreName;
+            string storeNameToUpdate = model.StoreName ?? currentUser.StoreName ?? string.Empty;
 
             //update photo if it's provided
-            string photoUrlToUpdate = currentUser.ProfilePhotoUrl; // Default to existing photo
+            string photoUrlToUpdate = currentUser.ProfilePhotoUrl ?? string.Empty; // Default to existing photo
             if (model.ProfilePhoto != null && model.ProfilePhoto.Length > 0)
             {
                 var photoUrl = _authService.SaveProfilePhoto(model.ProfilePhoto, userId);
@@ -392,9 +392,12 @@ namespace KitaKo.Controllers
                     ModelState.AddModelError("", "Current password is incorrect");
                     //Reload the user data to show
                     var updatedUser = _authService.GetUserById(userId);
-                    model.Username = updatedUser.Username;
-                    model.StoreName = updatedUser.StoreName;
-                    model.ProfilePhotoUrl = updatedUser.ProfilePhotoUrl;
+                    if (updatedUser != null)
+                    {
+                        model.Username = updatedUser.Username ?? string.Empty;
+                        model.StoreName = updatedUser.StoreName;
+                        model.ProfilePhotoUrl = updatedUser.ProfilePhotoUrl;
+                    }
                     return View(model);
                 }
             }
