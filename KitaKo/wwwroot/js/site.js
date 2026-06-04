@@ -1,18 +1,73 @@
 // ==================== KitaKo JavaScript - Complete Application Logic ====================
-// Client-side functionality with LocalStorage for data persistence
+// Client-side functionality backed by server APIs
 
 // ==================== DATA STORAGE ====================
 
-// Initialize data from localStorage
-let sales = JSON.parse(localStorage.getItem('kitako_sales')) || [];
-let utangs = JSON.parse(localStorage.getItem('kitako_utangs')) || [];
+let sales = [];
+let utangs = [];
+let expenses = [];
+let availableBudget = 0;
+let dailyGoal = 1000;
 
-// Refresh in-memory data from localStorage (use before rendering to avoid stale state)
+async function fetchJson(url, options = {}) {
+    const response = await fetch(url, {
+        credentials: 'same-origin',
+        ...options,
+        headers: {
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.headers || {})
+        }
+    });
+
+    if (response.status === 401) {
+        throw new Error('Unauthorized');
+    }
+
+    if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+    }
+
+    if (response.status === 204) {
+        return null;
+    }
+
+    return response.json();
+}
+
+function notifyDataChanged() {
+    window.dispatchEvent(new Event('kitako-data-changed'));
+}
+
 function refreshDataFromStorage() {
-    sales = JSON.parse(localStorage.getItem('kitako_sales')) || [];
-    utangs = JSON.parse(localStorage.getItem('kitako_utangs')) || [];
-    expenses = JSON.parse(localStorage.getItem('kitako_expenses')) || expenses;
-    availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || availableBudget;
+    // Server APIs are now the source of truth. This remains for older event hooks.
+}
+
+async function refreshSalesFromServer() {
+    sales = await fetchJson('/api/sales');
+}
+
+async function refreshExpensesFromServer() {
+    expenses = await fetchJson('/api/expenses');
+}
+
+async function refreshFinancialSettingsFromServer() {
+    const settings = await fetchJson('/api/settings/financial');
+    availableBudget = parseFloat(settings.availableBudget) || 0;
+    dailyGoal = parseFloat(settings.dailySalesGoal) || 1000;
+}
+
+async function saveFinancialSettings() {
+    const settings = await fetchJson('/api/settings/financial', {
+        method: 'PUT',
+        body: JSON.stringify({
+            availableBudget,
+            dailySalesGoal: dailyGoal
+        })
+    });
+
+    availableBudget = parseFloat(settings.availableBudget) || 0;
+    dailyGoal = parseFloat(settings.dailySalesGoal) || 1000;
+    notifyDataChanged();
 }
 
 // Refresh utangs from server
@@ -26,35 +81,23 @@ async function refreshUtangsFromServer() {
         if (response.ok) {
             const serverUtangs = await response.json();
             utangs = serverUtangs;
-            saveUtangs();
         }
     } catch (error) {
         console.error('Error fetching utangs from server:', error);
     }
 }
 
-// Save data to localStorage
-function saveSales() {
-    localStorage.setItem('kitako_sales', JSON.stringify(sales));
-}
-
-function saveUtangs() {
-    localStorage.setItem('kitako_utangs', JSON.stringify(utangs));
-}
-
 // ==================== DAILY GOAL PERSISTENCE ====================
 
 function getDailyGoal() {
-    const raw = localStorage.getItem('kitako_daily_goal');
-    const n = parseFloat(raw);
+    const n = parseFloat(dailyGoal);
     if (!isFinite(n) || n <= 0) return 1000;
     return n;
 }
 
-function setDailyGoal(value) {
-    localStorage.setItem('kitako_daily_goal', String(value));
-    // notify other listeners/pages in same window
-    window.dispatchEvent(new Event('kitako-data-changed'));
+async function setDailyGoal(value) {
+    dailyGoal = value;
+    await saveFinancialSettings();
 }
 
 // ==================== MODAL FUNCTIONS ====================
@@ -118,7 +161,7 @@ function closeGoalModal() {
 }
 
 // Save daily goal from modal
-function saveDailyGoal() {
+async function saveDailyGoal() {
     const input = document.getElementById('dailyGoalInput');
     if (!input) return;
     const val = parseFloat(input.value);
@@ -127,12 +170,17 @@ function saveDailyGoal() {
         input.focus();
         return;
     }
-    setDailyGoal(val);
-    closeGoalModal();
-    showNotification('Daily goal updated', 'success');
+    try {
+        await setDailyGoal(val);
+        closeGoalModal();
+        showNotification('Daily goal updated', 'success');
 
-    // Update UI immediately
-    if (typeof updateDashboard === 'function') updateDashboard();
+        // Update UI immediately
+        if (typeof updateDashboard === 'function') updateDashboard();
+    } catch (error) {
+        console.error('Error saving daily goal:', error);
+        alert('Unable to save daily goal. Please try again.');
+    }
 }
 
 // Close modal when clicking outside
@@ -154,7 +202,7 @@ window.onclick = function (event) {
 
 // ==================== SALE FUNCTIONS ====================
 
-function addSale() {
+async function addSale() {
     const amount = parseFloat(document.getElementById('saleAmount').value);
     const profit = parseFloat(document.getElementById('saleProfit').value);
     const description = document.getElementById('saleDescription').value;
@@ -165,22 +213,29 @@ function addSale() {
     }
 
     const sale = {
-        id: Date.now(),
         amount: amount,
         profit: profit,
-        description: description || 'Sale',
-        date: new Date().toISOString()
+        description: description || 'Sale'
     };
 
-    sales.push(sale);
-    saveSales();
-    closeSaleModal();
+    try {
+        const createdSale = await fetchJson('/api/sales', {
+            method: 'POST',
+            body: JSON.stringify(sale)
+        });
 
-    // Update UI based on current page
-    if (typeof updateDashboard === 'function') updateDashboard();
-    if (typeof updateSalesTracker === 'function') updateSalesTracker();
+        sales.unshift(createdSale);
+        closeSaleModal();
 
-    showNotification('Sale added successfully!', 'success');
+        // Update UI based on current page
+        if (typeof updateDashboard === 'function') updateDashboard();
+        if (typeof updateSalesTracker === 'function') updateSalesTracker();
+
+        showNotification('Sale added successfully!', 'success');
+    } catch (error) {
+        console.error('Error adding sale:', error);
+        alert('Unable to add sale. Please try again.');
+    }
 }
 
 function getSalesByPeriod(period) {
@@ -315,12 +370,8 @@ async function markUtangPaid(id) {
 
         if (saleResponse.ok) {
             const createdSale = await saleResponse.json();
-            sales.push(createdSale);
+            sales.unshift(createdSale);
         }
-
-        // Save to localStorage without triggering events
-        localStorage.setItem('kitako_utangs', JSON.stringify(utangs));
-        localStorage.setItem('kitako_sales', JSON.stringify(sales));
 
         // Update UI on current page only
         if (document.getElementById('utangTableContainer')) {
@@ -352,16 +403,16 @@ function getUtangStatus(dueDate) {
 // ==================== DASHBOARD UPDATES ====================
 
 function updateDashboard() {
-    // Fetch from server first, then update UI
-    fetch('/api/utangs')
-        .then(response => response.ok ? response.json() : utangs)
-        .then(serverUtangs => {
-            utangs = serverUtangs;
+    Promise.all([
+        refreshSalesFromServer(),
+        refreshUtangsFromServer(),
+        refreshFinancialSettingsFromServer()
+    ])
+        .then(() => {
             renderDashboard();
         })
-        .catch(() => {
-            // Fallback to localStorage data
-            refreshDataFromStorage();
+        .catch((error) => {
+            console.error('Error refreshing dashboard:', error);
             renderDashboard();
         });
 }
@@ -465,8 +516,12 @@ function renderDashboard() {
 
 // ==================== SALES TRACKER UPDATES ====================
 
-function updateSalesTracker() {
-    refreshDataFromStorage();
+async function updateSalesTracker() {
+    try {
+        await refreshSalesFromServer();
+    } catch (error) {
+        console.error('Error refreshing sales:', error);
+    }
 
     // Update period stats
     const dailySales = getSalesByPeriod('daily');
@@ -666,33 +721,34 @@ function renderUtangLogs() {
 
 
 
-// Load available budget
-let availableBudget = parseFloat(localStorage.getItem('kitako_budget')) || 0;
-
-// ==================== LOCAL STORAGE HELPERS ====================
-
+// New function: clear expenses and budget so user can start fresh
 function saveExpenses() {
-    localStorage.setItem('kitako_expenses', JSON.stringify(expenses));
-    // notify other listeners/pages in same window
-    window.dispatchEvent(new Event('kitako-data-changed'));
+    notifyDataChanged();
 }
 
 function saveBudget() {
-    localStorage.setItem('kitako_budget', availableBudget.toString());
-    window.dispatchEvent(new Event('kitako-data-changed'));
+    saveFinancialSettings().catch((error) => console.error('Error saving budget:', error));
 }
-sto
-// New function: clear expenses and budget so user can start fresh
-function clearExpensesAndBudget() {
-    if (!confirm('Clear ALL expenses and reset the budget to ₱0? This cannot be undone.')) return;
+
+async function clearExpensesAndBudget() {
+    const shouldClearExpenses = confirm('Clear ALL expenses and reset the budget to zero? This cannot be undone.');
+    if (!shouldClearExpenses) return;
+
+    try {
+        await fetchJson('/api/expenses', { method: 'DELETE' });
+    } catch (error) {
+        console.error('Error clearing expenses:', error);
+        alert('Unable to clear expenses. Please try again.');
+        return;
+    }
+    // confirmed before the server delete
 
     // Clear in-memory
     expenses = [];
     availableBudget = 0;
 
-    // Persist changes (save functions dispatch kitako-data-changed)
-    saveExpenses();
-    saveBudget();
+    // Persist budget reset
+    await saveFinancialSettings();
 
     // Update UI immediately
     if (typeof updateExpensesPage === 'function') updateExpensesPage();
@@ -806,7 +862,7 @@ function updatePriorityDisplay(priority) {
 
 // ==================== EXPENSE ACTIONS ====================
 
-function addExpense() {
+async function addExpense() {
     const nameEl = document.getElementById('expenseName');
     const amountEl = document.getElementById('expenseAmount');
     const dueDateEl = document.getElementById('expenseDueDate');
@@ -823,7 +879,6 @@ function addExpense() {
     }
 
     const expense = {
-        id: Date.now(),
         name,
         amount,
         dueDate,
@@ -831,16 +886,25 @@ function addExpense() {
         paid: false
     };
 
-    expenses.push(expense);
-    saveExpenses();
-    closeExpenseModal();
-    updateExpensesPage();
-    showNotification('Expense added successfully!', 'success');
+    try {
+        const createdExpense = await fetchJson('/api/expenses', {
+            method: 'POST',
+            body: JSON.stringify(expense)
+        });
+
+        expenses.push(createdExpense);
+        closeExpenseModal();
+        updateExpensesPage();
+        showNotification('Expense added successfully!', 'success');
+    } catch (error) {
+        console.error('Error adding expense:', error);
+        alert('Unable to add expense. Please try again.');
+    }
 }
 
-function markExpensePaid(id) {
+async function markExpensePaid(id) {
     // Ensure latest state
-    refreshDataFromStorage();
+    await Promise.all([refreshExpensesFromServer(), refreshFinancialSettingsFromServer()]);
 
     const idx = expenses.findIndex(e => e.id === id);
     if (idx === -1) return;
@@ -858,32 +922,48 @@ function markExpensePaid(id) {
     availableBudget = parseFloat(availableBudget) || 0;
     // Prevent negative budget (clamp to 0). Remove Math.max(...) if you want negatives allowed.
     availableBudget = Math.max(0, availableBudget - amt);
-    saveBudget();
-
     // Mark expense as paid and persist
     expenses[idx] = { ...expense, paid: true };
-    saveExpenses();
+
+    try {
+        await fetchJson(`/api/expenses/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(expenses[idx])
+        });
+        await saveFinancialSettings();
+    } catch (error) {
+        console.error('Error marking expense paid:', error);
+        alert('Unable to mark expense as paid. Please try again.');
+        return;
+    }
 
     // Refresh UI
     updateExpensesPage();
     showNotification(`Expense marked as paid. Budget reduced by ₱${amt.toFixed(2)}.`, 'success');
 }
 
-function deleteExpense(id) {
+async function deleteExpense(id) {
     if (!confirm('Delete this expense?')) return;
 
+    try {
+        await fetchJson(`/api/expenses/${id}`, { method: 'DELETE' });
+    } catch (error) {
+        console.error('Error deleting expense:', error);
+        alert('Unable to delete expense. Please try again.');
+        return;
+    }
+
     expenses = expenses.filter(expense => expense.id !== id);
-    saveExpenses();
     updateExpensesPage();
     showNotification('Expense deleted!', 'success');
 }
 
-function updateBudget() {
+async function updateBudget() {
     const newBudget = prompt('Enter new available budget:', availableBudget);
 
     if (newBudget && !isNaN(newBudget)) {
         availableBudget = parseFloat(newBudget);
-        saveBudget();
+        await saveFinancialSettings();
         updateExpensesPage();
         showNotification('Budget updated!', 'success');
     }
@@ -891,9 +971,12 @@ function updateBudget() {
 
 // ==================== PAGE RENDERING ====================
 
-function updateExpensesPage() {
-    // Ensure we have the latest data
-    refreshDataFromStorage();
+async function updateExpensesPage() {
+    try {
+        await Promise.all([refreshExpensesFromServer(), refreshFinancialSettingsFromServer()]);
+    } catch (error) {
+        console.error('Error refreshing expenses:', error);
+    }
 
     const optimizedIds = knapsackOptimize();
 

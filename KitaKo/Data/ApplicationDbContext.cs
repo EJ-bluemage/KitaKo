@@ -13,6 +13,7 @@ namespace KitaKo.Data
         public DbSet<Expenses> Expenses { get; set; }
         public DbSet<Sale> Sales { get; set; }
         public DbSet<Utang> Utangs { get; set; }
+        public DbSet<UserFinancialSettings> UserFinancialSettings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -39,6 +40,9 @@ namespace KitaKo.Data
                 entity.Property(e => e.Priority).HasDefaultValue(1);
                 entity.Property(e => e.Paid).HasDefaultValue(false);
                 entity.Property(e => e.CreatedDate).HasDefaultValueSql("CURRENT_TIMESTAMP");
+                entity.HasIndex(e => new { e.UserId, e.DueDate });
+                entity.HasIndex(e => new { e.UserId, e.Paid });
+                entity.HasOne<User>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             });
 
             // Configure Sale table
@@ -49,6 +53,8 @@ namespace KitaKo.Data
                 entity.Property(e => e.Profit).HasPrecision(18, 2);
                 entity.Property(e => e.Description).HasMaxLength(500);
                 entity.Property(e => e.Date).HasDefaultValueSql("CURRENT_TIMESTAMP");
+                entity.HasIndex(e => new { e.UserId, e.Date });
+                entity.HasOne<User>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             });
 
             // Configure Utang table
@@ -58,6 +64,19 @@ namespace KitaKo.Data
                 entity.Property(e => e.CustomerName).HasMaxLength(200);
                 entity.Property(e => e.Amount).HasPrecision(18, 2);
                 entity.Property(e => e.CreatedDate).HasDefaultValueSql("CURRENT_TIMESTAMP");
+                entity.HasIndex(e => new { e.UserId, e.DueDate });
+                entity.HasIndex(e => new { e.UserId, e.Paid });
+                entity.HasOne<User>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<UserFinancialSettings>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.AvailableBudget).HasPrecision(18, 2).HasDefaultValue(0);
+                entity.Property(e => e.DailySalesGoal).HasPrecision(18, 2).HasDefaultValue(1000);
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+                entity.HasIndex(e => e.UserId).IsUnique();
+                entity.HasOne<User>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             });
         }
     }

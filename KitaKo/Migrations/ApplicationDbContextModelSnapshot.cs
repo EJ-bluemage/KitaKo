@@ -61,6 +61,10 @@ namespace KitaKo.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId", "DueDate");
+
+                    b.HasIndex("UserId", "Paid");
+
                     b.ToTable("Expenses");
                 });
 
@@ -93,6 +97,8 @@ namespace KitaKo.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Date");
 
                     b.ToTable("Sales");
                 });
@@ -141,6 +147,42 @@ namespace KitaKo.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("KitaKo.Models.UserFinancialSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AvailableBudget")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<decimal>("DailySalesGoal")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasDefaultValue(1000m);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserFinancialSettings");
+                });
+
             modelBuilder.Entity("KitaKo.Models.Utang", b =>
                 {
                     b.Property<int>("Id")
@@ -173,7 +215,47 @@ namespace KitaKo.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId", "DueDate");
+
+                    b.HasIndex("UserId", "Paid");
+
                     b.ToTable("Utangs");
+                });
+
+            modelBuilder.Entity("KitaKo.Models.Expenses", b =>
+                {
+                    b.HasOne("KitaKo.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KitaKo.Models.Sale", b =>
+                {
+                    b.HasOne("KitaKo.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KitaKo.Models.UserFinancialSettings", b =>
+                {
+                    b.HasOne("KitaKo.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KitaKo.Models.Utang", b =>
+                {
+                    b.HasOne("KitaKo.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

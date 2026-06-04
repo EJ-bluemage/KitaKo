@@ -12,11 +12,11 @@ namespace KitaKo.Controllers
         private readonly AuthService _authService;
         private readonly ApplicationDbContext _dbContext;
 
-        public HomeController(ApplicationDbContext dbContext)
+        public HomeController(ApplicationDbContext dbContext, KnapsackService knapsackService, AuthService authService)
         {
-            _knapsackService = new KnapsackService();
+            _knapsackService = knapsackService;
             _dbContext = dbContext;
-            _authService = new AuthService(dbContext);
+            _authService = authService;
         }
 
         // Landing Page
@@ -78,20 +78,25 @@ namespace KitaKo.Controllers
             try
             {
                 var userId = HttpContext.Session.GetString("UserId");
-                if (string.IsNullOrEmpty(userId))
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out var currentUserId))
                 {
                     return Json(new { success = false, message = "User not logged in" });
                 }
 
-                sale.UserId = int.Parse(userId);
+                if (!TryValidateModel(sale))
+                {
+                    return Json(new { success = false, message = "Please check the sale details and try again." });
+                }
+
+                sale.UserId = currentUserId;
                 sale.Date = DateTime.UtcNow;
                 _dbContext.Sales.Add(sale);
                 _dbContext.SaveChanges();
                 return Json(new { success = true, sale });
             }
-            catch (Exception ex)
+            catch
             {
-                return Json(new { success = false, message = ex.Message });
+                return Json(new { success = false, message = "Unable to save sale right now." });
             }
         }
 
@@ -102,20 +107,25 @@ namespace KitaKo.Controllers
             try
             {
                 var userId = HttpContext.Session.GetString("UserId");
-                if (string.IsNullOrEmpty(userId))
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out var currentUserId))
                 {
                     return Json(new { success = false, message = "User not logged in" });
                 }
 
-                utang.UserId = int.Parse(userId);
+                if (!TryValidateModel(utang))
+                {
+                    return Json(new { success = false, message = "Please check the utang details and try again." });
+                }
+
+                utang.UserId = currentUserId;
                 utang.CreatedDate = DateTime.UtcNow;
                 _dbContext.Utangs.Add(utang);
                 _dbContext.SaveChanges();
                 return Json(new { success = true, utang });
             }
-            catch (Exception ex)
+            catch
             {
-                return Json(new { success = false, message = ex.Message });
+                return Json(new { success = false, message = "Unable to save utang right now." });
             }
         }
 
@@ -125,7 +135,13 @@ namespace KitaKo.Controllers
         {
             try
             {
-                var utang = _dbContext.Utangs.FirstOrDefault(u => u.Id == id);
+                var userId = HttpContext.Session.GetString("UserId");
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out var currentUserId))
+                {
+                    return Json(new { success = false, message = "User not logged in" });
+                }
+
+                var utang = _dbContext.Utangs.FirstOrDefault(u => u.Id == id && u.UserId == currentUserId);
                 if (utang == null)
                 {
                     return Json(new { success = false, message = "Utang not found" });
@@ -135,9 +151,9 @@ namespace KitaKo.Controllers
                 _dbContext.SaveChanges();
                 return Json(new { success = true });
             }
-            catch (Exception ex)
+            catch
             {
-                return Json(new { success = false, message = ex.Message });
+                return Json(new { success = false, message = "Unable to update utang right now." });
             }
         }
 
@@ -148,20 +164,25 @@ namespace KitaKo.Controllers
             try
             {
                 var userId = HttpContext.Session.GetString("UserId");
-                if (string.IsNullOrEmpty(userId))
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out var currentUserId))
                 {
                     return Json(new { success = false, message = "User not logged in" });
                 }
 
-                expense.UserId = int.Parse(userId);
+                if (!TryValidateModel(expense))
+                {
+                    return Json(new { success = false, message = "Please check the expense details and try again." });
+                }
+
+                expense.UserId = currentUserId;
                 expense.CreatedDate = DateTime.UtcNow;
                 _dbContext.Expenses.Add(expense);
                 _dbContext.SaveChanges();
                 return Json(new { success = true, expense });
             }
-            catch (Exception ex)
+            catch
             {
-                return Json(new { success = false, message = ex.Message });
+                return Json(new { success = false, message = "Unable to save expense right now." });
             }
         }
 
@@ -179,7 +200,13 @@ namespace KitaKo.Controllers
         {
             try
             {
-                var expense = _dbContext.Expenses.FirstOrDefault(e => e.Id == id);
+                var userId = HttpContext.Session.GetString("UserId");
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out var currentUserId))
+                {
+                    return Json(new { success = false, message = "User not logged in" });
+                }
+
+                var expense = _dbContext.Expenses.FirstOrDefault(e => e.Id == id && e.UserId == currentUserId);
                 if (expense == null)
                 {
                     return Json(new { success = false, message = "Expense not found" });
@@ -189,9 +216,9 @@ namespace KitaKo.Controllers
                 _dbContext.SaveChanges();
                 return Json(new { success = true });
             }
-            catch (Exception ex)
+            catch
             {
-                return Json(new { success = false, message = ex.Message });
+                return Json(new { success = false, message = "Unable to update expense right now." });
             }
         }
 
@@ -201,7 +228,13 @@ namespace KitaKo.Controllers
         {
             try
             {
-                var expense = _dbContext.Expenses.FirstOrDefault(e => e.Id == id);
+                var userId = HttpContext.Session.GetString("UserId");
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out var currentUserId))
+                {
+                    return Json(new { success = false, message = "User not logged in" });
+                }
+
+                var expense = _dbContext.Expenses.FirstOrDefault(e => e.Id == id && e.UserId == currentUserId);
                 if (expense == null)
                 {
                     return Json(new { success = false, message = "Expense not found" });
@@ -211,9 +244,9 @@ namespace KitaKo.Controllers
                 _dbContext.SaveChanges();
                 return Json(new { success = true });
             }
-            catch (Exception ex)
+            catch
             {
-                return Json(new { success = false, message = ex.Message });
+                return Json(new { success = false, message = "Unable to delete expense right now." });
             }
         }
 
@@ -355,6 +388,12 @@ namespace KitaKo.Controllers
                 return RedirectToAction("Login");
             }
 
+            model.ProfilePhotoUrl = currentUser.ProfilePhotoUrl;
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
             //update username if it's provided and different
             string usernameToUpdate = string.IsNullOrWhiteSpace(model.Username)
                 ? currentUser.Username
@@ -367,10 +406,18 @@ namespace KitaKo.Controllers
             string photoUrlToUpdate = currentUser.ProfilePhotoUrl ?? string.Empty; // Default to existing photo
             if (model.ProfilePhoto != null && model.ProfilePhoto.Length > 0)
             {
-                var photoUrl = _authService.SaveProfilePhoto(model.ProfilePhoto, userId);
-                if (!string.IsNullOrEmpty(photoUrl))
+                try
                 {
-                    photoUrlToUpdate = photoUrl;
+                    var photoUrl = _authService.SaveProfilePhoto(model.ProfilePhoto, userId);
+                    if (!string.IsNullOrEmpty(photoUrl))
+                    {
+                        photoUrlToUpdate = photoUrl;
+                    }
+                }
+                catch (InvalidOperationException ex)
+                {
+                    ModelState.AddModelError(nameof(model.ProfilePhoto), ex.Message);
+                    return View(model);
                 }
             }
 
@@ -383,7 +430,13 @@ namespace KitaKo.Controllers
                 return View(model);
             }
 
-            //BOTH current and new passwords must be providef
+            if (string.IsNullOrEmpty(model.CurrentPassword) != string.IsNullOrEmpty(model.NewPassword))
+            {
+                ModelState.AddModelError("", "Current password and new password must both be provided.");
+                return View(model);
+            }
+
+            //BOTH current and new passwords must be provided
             if (!string.IsNullOrEmpty(model.CurrentPassword) && !string.IsNullOrEmpty(model.NewPassword))
             {
                 var passwordChanged = _authService.ChangePassword(userId, model.CurrentPassword, model.NewPassword);

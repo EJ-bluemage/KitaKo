@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using KitaKo.Models;
-using KitaKo.Data.Repositories;
+using Microsoft.EntityFrameworkCore;
+using KitaKo.Data;
 
 namespace KitaKo.Controllers
 {
@@ -8,71 +9,142 @@ namespace KitaKo.Controllers
     [Route("api/[controller]")]
     public class ExpensesController : ControllerBase
     {
-        private readonly IRepository<Expenses> _repository;
+        private readonly ApplicationDbContext _dbContext;
 
-        public ExpensesController(IRepository<Expenses> repository)
+        public ExpensesController(ApplicationDbContext dbContext)
         {
-            _repository = repository;
+            _dbContext = dbContext;
         }
 
-        // GET: api/expenses
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Expenses>>> GetExpenses()
         {
-            var expenses = await _repository.GetAllAsync();
+            if (!TryGetCurrentUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var expenses = await _dbContext.Expenses
+                .Where(e => e.UserId == userId)
+                .OrderBy(e => e.Paid)
+                .ThenBy(e => e.DueDate)
+                .ToListAsync();
+
             return Ok(expenses);
         }
 
-        // GET: api/expenses/5
         [HttpGet("{id}")]
         public async Task<ActionResult<Expenses>> GetExpense(int id)
         {
-            var expense = await _repository.GetByIdAsync(id);
+            if (!TryGetCurrentUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var expense = await _dbContext.Expenses
+                .FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
+
             if (expense == null)
+            {
                 return NotFound();
+            }
 
             return Ok(expense);
         }
 
-        // POST: api/expenses
         [HttpPost]
         public async Task<ActionResult<Expenses>> PostExpense(Expenses expense)
         {
+            if (!TryGetCurrentUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            expense.UserId = userId;
             expense.CreatedDate = DateTime.UtcNow;
-            // Ensure DueDate is UTC
-            if (expense.DueDate.Kind == DateTimeKind.Unspecified)
-                expense.DueDate = DateTime.SpecifyKind(expense.DueDate, DateTimeKind.Utc);
-            var createdExpense = await _repository.AddAsync(expense);
-            return CreatedAtAction(nameof(GetExpense), new { id = createdExpense.Id }, createdExpense);
+            expense.DueDate = EnsureUtc(expense.DueDate);
+
+            _dbContext.Expenses.Add(expense);
+            await _dbContext.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetExpense), new { id = expense.Id }, expense);
         }
 
-        // PUT: api/expenses/5
         [HttpPut("{id}")]
         public async Task<IActionResult> PutExpense(int id, Expenses expense)
         {
-            var existingExpense = await _repository.GetByIdAsync(id);
+            if (!TryGetCurrentUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var existingExpense = await _dbContext.Expenses
+                .FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
+
             if (existingExpense == null)
+            {
                 return NotFound();
+            }
 
             existingExpense.Name = expense.Name;
             existingExpense.Amount = expense.Amount;
-            existingExpense.DueDate = expense.DueDate;
+            existingExpense.DueDate = EnsureUtc(expense.DueDate);
             existingExpense.Priority = expense.Priority;
             existingExpense.Paid = expense.Paid;
 
-            await _repository.UpdateAsync(existingExpense);
+            await _dbContext.SaveChangesAsync();
             return NoContent();
         }
 
-        // DELETE: api/expenses/5
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteExpense(int id)
         {
-            var result = await _repository.DeleteAsync(id);
-            if (!result)
-                return NotFound();
+            if (!TryGetCurrentUserId(out var userId))
+            {
+                return Unauthorized();
+            }
 
+            var expense = await _dbContext.Expenses
+                .FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
+
+            if (expense == null)
+            {
+                return NotFound();
+            }
+
+            _dbContext.Expenses.Remove(expense);
+            await _dbContext.SaveChangesAsync();
             return NoContent();
+        }
+
+        [HttpDelete]
+        public async Task<IActionResult> DeleteExpenses()
+        {
+            if (!TryGetCurrentUserId(out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var expenses = await _dbContext.Expenses
+                .Where(e => e.UserId == userId)
+                .ToListAsync();
+
+            _dbContext.Expenses.RemoveRange(expenses);
+            await _dbContext.SaveChangesAsync();
+            return NoContent();
+        }
+
+        private bool TryGetCurrentUserId(out int userId)
+        {
+            var userIdStr = HttpContext.Session.GetString("UserId");
+            return int.TryParse(userIdStr, out userId);
+        }
+
+        private static DateTime EnsureUtc(DateTime value)
+        {
+            return value.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+                : value.ToUniversalTime();
         }
     }
 }

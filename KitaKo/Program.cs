@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using KitaKo.Data;
 using KitaKo.Data.Repositories;
+using KitaKo.Models;
+using KitaKo.Services;
+using Microsoft.AspNetCore.Identity;
 
 namespace KitaKo
 {
@@ -22,6 +25,9 @@ namespace KitaKo
 
             // Add generic repository
             builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+            builder.Services.AddScoped<AuthService>();
+            builder.Services.AddScoped<KnapsackService>();
+            builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 
             builder.Services.AddControllersWithViews();
 

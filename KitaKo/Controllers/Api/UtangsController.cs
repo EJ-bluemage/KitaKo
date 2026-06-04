@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using KitaKo.Models;
-using KitaKo.Data.Repositories;
 using Microsoft.EntityFrameworkCore;
 using KitaKo.Data;
 
@@ -10,106 +9,124 @@ namespace KitaKo.Controllers
     [Route("api/[controller]")]
     public class UtangsController : ControllerBase
     {
-        private readonly IRepository<Utang> _repository;
         private readonly ApplicationDbContext _dbContext;
 
-        public UtangsController(IRepository<Utang> repository, ApplicationDbContext dbContext)
+        public UtangsController(ApplicationDbContext dbContext)
         {
-            _repository = repository;
             _dbContext = dbContext;
         }
 
-        // GET: api/utangs
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Utang>>> GetUtangs()
         {
-            var userIdStr = HttpContext.Session.GetString("UserId");
-            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out int userId))
+            if (!TryGetCurrentUserId(out var userId))
             {
                 return Unauthorized();
             }
 
-            var utangs = await _dbContext.Utangs.Where(u => u.UserId == userId).ToListAsync();
+            var utangs = await _dbContext.Utangs
+                .Where(u => u.UserId == userId)
+                .OrderBy(u => u.Paid)
+                .ThenBy(u => u.DueDate)
+                .ToListAsync();
+
             return Ok(utangs);
         }
 
-        // GET: api/utangs/5
         [HttpGet("{id}")]
         public async Task<ActionResult<Utang>> GetUtang(int id)
         {
-            var userIdStr = HttpContext.Session.GetString("UserId");
-            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out int userId))
+            if (!TryGetCurrentUserId(out var userId))
             {
                 return Unauthorized();
             }
 
-            var utang = await _repository.GetByIdAsync(id);
-            if (utang == null || utang.UserId != userId)
+            var utang = await _dbContext.Utangs
+                .FirstOrDefaultAsync(u => u.Id == id && u.UserId == userId);
+
+            if (utang == null)
+            {
                 return NotFound();
+            }
 
             return Ok(utang);
         }
 
-        // POST: api/utangs
         [HttpPost]
         public async Task<ActionResult<Utang>> PostUtang(Utang utang)
         {
-            var userIdStr = HttpContext.Session.GetString("UserId");
-            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out int userId))
+            if (!TryGetCurrentUserId(out var userId))
             {
                 return Unauthorized();
             }
 
             utang.UserId = userId;
             utang.CreatedDate = DateTime.UtcNow;
-            // Ensure DueDate is UTC
-            if (utang.DueDate.Kind == DateTimeKind.Unspecified)
-                utang.DueDate = DateTime.SpecifyKind(utang.DueDate, DateTimeKind.Utc);
-            var createdUtang = await _repository.AddAsync(utang);
-            return CreatedAtAction(nameof(GetUtang), new { id = createdUtang.Id }, createdUtang);
+            utang.DueDate = EnsureUtc(utang.DueDate);
+
+            _dbContext.Utangs.Add(utang);
+            await _dbContext.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetUtang), new { id = utang.Id }, utang);
         }
 
-        // PUT: api/utangs/5
         [HttpPut("{id}")]
         public async Task<IActionResult> PutUtang(int id, Utang utang)
         {
-            var userIdStr = HttpContext.Session.GetString("UserId");
-            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out int userId))
+            if (!TryGetCurrentUserId(out var userId))
             {
                 return Unauthorized();
             }
 
-            var existingUtang = await _repository.GetByIdAsync(id);
-            if (existingUtang == null || existingUtang.UserId != userId)
+            var existingUtang = await _dbContext.Utangs
+                .FirstOrDefaultAsync(u => u.Id == id && u.UserId == userId);
+
+            if (existingUtang == null)
+            {
                 return NotFound();
+            }
 
             existingUtang.CustomerName = utang.CustomerName;
             existingUtang.Amount = utang.Amount;
-            existingUtang.DueDate = utang.DueDate;
+            existingUtang.DueDate = EnsureUtc(utang.DueDate);
+            existingUtang.Paid = utang.Paid;
 
-            await _repository.UpdateAsync(existingUtang);
+            await _dbContext.SaveChangesAsync();
             return NoContent();
         }
 
-        // DELETE: api/utangs/5
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUtang(int id)
         {
-            var userIdStr = HttpContext.Session.GetString("UserId");
-            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out int userId))
+            if (!TryGetCurrentUserId(out var userId))
             {
                 return Unauthorized();
             }
 
-            var utang = await _repository.GetByIdAsync(id);
-            if (utang == null || utang.UserId != userId)
-                return NotFound();
+            var utang = await _dbContext.Utangs
+                .FirstOrDefaultAsync(u => u.Id == id && u.UserId == userId);
 
-            var result = await _repository.DeleteAsync(id);
-            if (!result)
+            if (utang == null)
+            {
                 return NotFound();
+            }
 
+            _dbContext.Utangs.Remove(utang);
+            await _dbContext.SaveChangesAsync();
             return NoContent();
+        }
+
+        private bool TryGetCurrentUserId(out int userId)
+        {
+            var userIdStr = HttpContext.Session.GetString("UserId");
+            return int.TryParse(userIdStr, out userId);
+        }
+
+        private static DateTime EnsureUtc(DateTime value)
+        {
+            return value.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+                : value.ToUniversalTime();
         }
     }
 }
